@@ -1,21 +1,29 @@
+require("dotenv").config();
+const { ethers } = require("hardhat");
+
 async function main() {
     const [deployer] = await ethers.getSigners();
-    console.log("Deploying the contract with the account:", deployer.address);
+    console.log("Deploying the contracts with the account:", deployer.address);
 
     // Fetch balance to verify deployment account has funds
     const balance = await deployer.getBalance();
     console.log("Account balance:", ethers.utils.formatEther(balance));
 
-    // Get the contract factory
+    // Get the Blackjack contract factory
     const Blackjack = await ethers.getContractFactory("Blackjack");
 
-    // Deploy contract (change the minimum bet amount if needed)
-    const blackjack = await BettingBlackjack.deploy(ethers.utils.parseEther("0.01"));
-
-    // Wait for deployment to finish
+    // Deploy the Blackjack contract (change the minimum bet amount if needed)
+    const blackjack = await Blackjack.deploy(ethers.utils.parseEther("0.01"));
     await blackjack.deployed();
-
     console.log("Blackjack deployed to:", blackjack.address);
+
+    // Get the CrapsGame contract factory
+    const CrapsGame = await ethers.getContractFactory("CrapsGame");
+
+    // Deploy the CrapsGame contract
+    const crapsGame = await CrapsGame.deploy();
+    await crapsGame.deployed();
+    console.log("CrapsGame deployed to:", crapsGame.address);
 }
 
 main()
