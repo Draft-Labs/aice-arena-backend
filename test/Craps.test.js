@@ -1,9 +1,9 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("CrapsGame", function () {
+describe("Craps", function () {
     let HouseTreasury;
-    let CrapsGame;
+    let Craps;
     let treasury;
     let craps;
     let owner;
@@ -17,11 +17,12 @@ describe("CrapsGame", function () {
         HouseTreasury = await ethers.getContractFactory("HouseTreasury");
         treasury = await (await HouseTreasury.deploy()).waitForDeployment();
         
-        CrapsGame = await ethers.getContractFactory("CrapsGame");
-        craps = await (await CrapsGame.deploy(minBetAmount, treasury.getAddress())).waitForDeployment();
+        Craps = await ethers.getContractFactory("Craps");
+        craps = await (await Craps.deploy(minBetAmount, treasury.getAddress())).waitForDeployment();
         
         await treasury.connect(owner).authorizeGame(await craps.getAddress());
         await treasury.connect(owner).fundTreasury({ value: ethers.parseEther("10.0") });
+        await craps.connect(owner).setActionCooldown(0);
     });
 
     describe("Betting Functions", function () {

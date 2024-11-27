@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT 
-pragma solidity ^0.8.0;
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+pragma solidity ^0.8.20;
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./HouseTreasury.sol";
 
 contract Blackjack is ReentrancyGuard {
@@ -37,8 +37,9 @@ contract Blackjack is ReentrancyGuard {
     event CardDealt(address indexed player, uint8 card);
     event ContractPaused();
     event ContractUnpaused();
+    event BetResolved(address indexed player, uint256 amount);
 
-    constructor(uint256 _minBetAmount, address _treasuryAddress) {
+    constructor(uint256 _minBetAmount, address payable _treasuryAddress) {
         owner = msg.sender;
         minBetAmount = _minBetAmount;
         treasury = HouseTreasury(_treasuryAddress);
@@ -50,7 +51,7 @@ contract Blackjack is ReentrancyGuard {
     }
 
     modifier noActiveGame() {
-        require(!activeGames[msg.sender], "Player already in an active game");
+        require(!activeGames[msg.sender], "Player already has an active bet.");
         _;
     }
 
@@ -87,7 +88,7 @@ contract Blackjack is ReentrancyGuard {
 
     function placeBet() external payable nonReentrant noActiveGame whenNotPaused rateLimited {
         activeGames[msg.sender] = true;
-        require(msg.value >= minBetAmount, "Bet amount is below minimum required.");
+        require(msg.value >= minBetAmount, "Bet amount is below the minimum required.");
         require(playerHands[msg.sender].bet == 0, "Player already has an active bet.");
 
         playerHands[msg.sender] = PlayerHand({

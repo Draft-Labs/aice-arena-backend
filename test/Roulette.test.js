@@ -27,6 +27,7 @@ describe("Roulette", function () {
         await treasury.connect(owner).fundTreasury({ 
             value: ethers.parseEther("100.0") 
         });
+        await roulette.connect(owner).setActionCooldown(0); // Disable cooldown for testing
     });
 
     describe("Deployment", function () {

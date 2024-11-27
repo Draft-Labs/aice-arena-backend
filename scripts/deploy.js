@@ -1,32 +1,39 @@
-require("dotenv").config();
-const { ethers } = require("hardhat");
+const hre = require("hardhat");
 
 async function main() {
-    const [deployer] = await ethers.getSigners();
-    console.log("Deploying the contracts with the account:", deployer.address);
+  // Deploy Treasury
+  const HouseTreasury = await hre.ethers.getContractFactory("HouseTreasury");
+  const treasury = await HouseTreasury.deploy();
+  await treasury.waitForDeployment();
+  console.log("Treasury deployed to:", await treasury.getAddress());
 
-    // Fetch balance to verify deployment account has funds
-    const balance = await deployer.getBalance();
-    console.log("Account balance:", ethers.formatEther(balance));
+  // Deploy Games
+  const minBetAmount = hre.ethers.parseEther("0.01");
+  const treasuryAddress = await treasury.getAddress();
 
-    // Get the Blackjack contract factory
-    const Blackjack = await ethers.getContractFactory("Blackjack");
+  const Blackjack = await hre.ethers.getContractFactory("Blackjack");
+  const blackjack = await Blackjack.deploy(minBetAmount, treasuryAddress);
+  await blackjack.waitForDeployment();
+  console.log("Blackjack deployed to:", await blackjack.getAddress());
 
-    // Deploy the Blackjack contract (change the minimum bet amount if needed)
-    const blackjack = await Blackjack.deploy(ethers.parseEther("0.01"));
-    console.log("Blackjack deployed to:", blackjack.address);
+  const Roulette = await hre.ethers.getContractFactory("Roulette");
+  const roulette = await Roulette.deploy(minBetAmount, treasuryAddress);
+  await roulette.waitForDeployment();
+  console.log("Roulette deployed to:", await roulette.getAddress());
 
-    // Get the CrapsGame contract factory
-    const CrapsGame = await ethers.getContractFactory("CrapsGame");
+  const Craps = await hre.ethers.getContractFactory("Craps");
+  const craps = await Craps.deploy(minBetAmount, treasuryAddress);
+  await craps.waitForDeployment();
+  console.log("Craps deployed to:", await craps.getAddress());
 
-    // Deploy the CrapsGame contract
-    const crapsGame = await CrapsGame.deploy();
-    console.log("CrapsGame deployed to:", crapsGame.address);
+  // Authorize games in treasury
+  await treasury.authorizeGame(await blackjack.getAddress());
+  await treasury.authorizeGame(await roulette.getAddress());
+  await treasury.authorizeGame(await craps.getAddress());
+  console.log("Games authorized in treasury");
 }
 
-main()
-    .then(() => process.exit(0))
-    .catch(error => {
-        console.error(error);
-        process.exit(1);
-    });
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

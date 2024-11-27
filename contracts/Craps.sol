@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT 
-pragma solidity ^0.8.0;
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+pragma solidity ^0.8.20;
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./HouseTreasury.sol";
 
-contract CrapsGame is ReentrancyGuard {
+contract Craps is ReentrancyGuard {
     address public owner;
     uint256 public minBetAmount;
     HouseTreasury public treasury;
@@ -30,7 +30,7 @@ contract CrapsGame is ReentrancyGuard {
     bool private paused;
     uint256 private maxWithdrawalAmount = 10 ether;
     mapping(address => uint256) private lastActionTime;
-    uint256 private actionCooldown = 1 minutes;
+    uint256 private actionCooldown;
 
     event BetPlaced(address indexed player, BetType betType, uint256 amount);
     event GameResolved(address indexed player, uint256 winnings);
@@ -40,20 +40,16 @@ contract CrapsGame is ReentrancyGuard {
     event ContractUnpaused();
     event BetResolved(address indexed player, uint256 amount);
 
-    constructor(uint256 _minBetAmount, address _treasuryAddress) {
+    constructor(uint256 _minBetAmount, address payable _treasuryAddress) {
         owner = msg.sender;
         minBetAmount = _minBetAmount;
         treasury = HouseTreasury(_treasuryAddress);
         currentPhase = GamePhase.Off;
+        actionCooldown = 1 minutes;
     }
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner can call this function.");
-        _;
-    }
-
-    modifier noActiveGame() {
-        require(!activeGames[msg.sender], "Player already in an active game");
         _;
     }
 
@@ -88,8 +84,7 @@ contract CrapsGame is ReentrancyGuard {
         emit ContractUnpaused();
     }
 
-    function placeBet(BetType betType) external payable nonReentrant noActiveGame whenNotPaused rateLimited {
-        activeGames[msg.sender] = true;
+    function placeBet(BetType betType) external payable nonReentrant whenNotPaused rateLimited {
         require(msg.value >= minBetAmount, "Bet amount is below minimum required.");
         require(playerBets[msg.sender][betType].amount == 0, "Player already has an active bet of this type.");
 
@@ -232,5 +227,9 @@ contract CrapsGame is ReentrancyGuard {
         pendingWithdrawals[msg.sender] = 0;
         (bool success, ) = msg.sender.call{value: amount}("");
         require(success, "Transfer failed");
+    }
+
+    function setActionCooldown(uint256 _cooldown) external onlyOwner {
+        actionCooldown = _cooldown;
     }
 }
