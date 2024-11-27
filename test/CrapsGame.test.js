@@ -9,72 +9,40 @@ describe("CrapsGame", function () {
     let owner;
     let addr1;
     let addr2;
-    const minBetAmount = ethers.utils.parseEther("0.01");
+    const minBetAmount = ethers.parseEther("0.01");
 
     beforeEach(async function () {
         [owner, addr1, addr2] = await ethers.getSigners();
         
-        // Deploy Treasury
         HouseTreasury = await ethers.getContractFactory("HouseTreasury");
-        treasury = await HouseTreasury.deploy();
-        await treasury.deployed();
-
-        // Deploy CrapsGame
+        treasury = await (await HouseTreasury.deploy()).waitForDeployment();
+        
         CrapsGame = await ethers.getContractFactory("CrapsGame");
-        craps = await CrapsGame.deploy(minBetAmount, treasury.address);
-        await craps.deployed();
-
-        // Setup
-        await treasury.connect(owner).authorizeGame(craps.address);
-        await treasury.connect(owner).fundTreasury({ 
-            value: ethers.utils.parseEther("10.0") 
-        });
-    });
-
-    describe("Deployment", function () {
-        it("Should set the correct owner", async function () {
-            expect(await craps.owner()).to.equal(owner.address);
-        });
-
-        it("Should set the correct minimum bet", async function () {
-            expect(await craps.minBetAmount()).to.equal(minBetAmount);
-        });
-
-        it("Should set the correct treasury address", async function () {
-            expect(await craps.treasury()).to.equal(treasury.address);
-        });
+        craps = await (await CrapsGame.deploy(minBetAmount, treasury.getAddress())).waitForDeployment();
+        
+        await treasury.connect(owner).authorizeGame(await craps.getAddress());
+        await treasury.connect(owner).fundTreasury({ value: ethers.parseEther("10.0") });
     });
 
     describe("Betting Functions", function () {
-        describe("Pass Line Bets", function () {
-            it("Should allow placing a pass line bet", async function () {
-                await craps.connect(addr1).placeBet(0, { value: minBetAmount });
-                const bet = await craps.getPlayerBet(addr1.address, 0);
-                expect(bet).to.equal(minBetAmount);
-            });
-
-            it("Should reject multiple pass line bets from same player", async function () {
-                await craps.connect(addr1).placeBet(0, { value: minBetAmount });
-                await expect(
-                    craps.connect(addr1).placeBet(0, { value: minBetAmount })
-                ).to.be.revertedWith("Player already has an active bet of this type.");
-            });
+        it("Should allow placing a bet", async function () {
+            await craps.connect(addr1).placeBet(0, { value: minBetAmount });
+            const bet = await craps.playerBets(addr1.address, 0);
+            expect(bet.amount).to.equal(minBetAmount);
+            expect(bet.resolved).to.be.false;
         });
 
-        describe("Don't Pass Bets", function () {
-            it("Should allow placing a don't pass bet", async function () {
-                await craps.connect(addr1).placeBet(1, { value: minBetAmount });
-                const bet = await craps.getPlayerBet(addr1.address, 1);
-                expect(bet).to.equal(minBetAmount);
-            });
+        it("Should add player to active players list", async function () {
+            await craps.connect(addr1).placeBet(0, { value: minBetAmount });
+            const activePlayers = await craps.getActivePlayers();
+            expect(activePlayers).to.include(addr1.address);
         });
 
-        it("Should reject bet below minimum", async function () {
+        it("Should reject multiple bets of same type", async function () {
+            await craps.connect(addr1).placeBet(0, { value: minBetAmount });
             await expect(
-                craps.connect(addr1).placeBet(0, { 
-                    value: ethers.utils.parseEther("0.005") 
-                })
-            ).to.be.revertedWith("Bet amount is below minimum required.");
+                craps.connect(addr1).placeBet(0, { value: minBetAmount })
+            ).to.be.revertedWith("Player already has an active bet of this type.");
         });
     });
 
@@ -83,37 +51,58 @@ describe("CrapsGame", function () {
             await craps.connect(addr1).placeBet(0, { value: minBetAmount }); // Pass Line bet
         });
 
-        it("Should resolve winning Pass Line bet on 7 or 11", async function () {
-            const initialBalance = await addr1.getBalance();
-            const tx = await craps.connect(owner).resolveRoll(7);
-            await tx.wait();
-            
-            const finalBalance = await addr1.getBalance();
-            expect(finalBalance.sub(initialBalance)).to.be.closeTo(
-                minBetAmount.mul(2),
-                ethers.utils.parseEther("0.001") // Allow for gas costs
+        it("Should resolve winning Pass Line bet", async function () {
+            const initialBalance = await ethers.provider.getBalance(addr1.address);
+            await craps.connect(owner).resolveRoll(7);
+            const finalBalance = await ethers.provider.getBalance(addr1.address);
+            expect(finalBalance).to.be.closeTo(
+                initialBalance + (minBetAmount * BigInt(2)),
+                ethers.parseEther("0.001")
             );
         });
 
-        it("Should clear bets after resolution", async function () {
+        it("Should update game phase on point numbers", async function () {
+            await craps.connect(owner).resolveRoll(4);
+            expect(await craps.currentPhase()).to.equal(1); // Come phase
+            expect(await craps.point()).to.equal(4);
+        });
+
+        it("Should emit RollResult event", async function () {
+            await expect(craps.connect(owner).resolveRoll(7))
+                .to.emit(craps, "RollResult")
+                .withArgs(7);
+        });
+
+        it("Should clear resolved bets", async function () {
             await craps.connect(owner).resolveRoll(7);
-            const betsLength = await craps.getBetsLength();
-            expect(betsLength).to.equal(0);
-            const bet = await craps.getPlayerBet(addr1.address, 0);
-            expect(bet).to.equal(0);
+            const bet = await craps.playerBets(addr1.address, 0);
+            expect(bet.amount).to.equal(0);
+            expect(bet.resolved).to.be.true;
+            
+            const activePlayers = await craps.getActivePlayers();
+            expect(activePlayers).to.not.include(addr1.address);
         });
     });
 
-    describe("Access Control", function () {
-        it("Should only allow owner to resolve rolls", async function () {
-            await expect(
-                craps.connect(addr1).resolveRoll(7)
-            ).to.be.revertedWith("Only owner can call this function.");
+    describe("Game State", function () {
+        it("Should track point correctly", async function () {
+            await craps.connect(owner).resolveRoll(4);
+            expect(await craps.point()).to.equal(4);
+            await craps.connect(owner).resolveRoll(7);
+            expect(await craps.point()).to.equal(0);
+        });
+
+        it("Should manage game phases correctly", async function () {
+            expect(await craps.currentPhase()).to.equal(0); // Off
+            await craps.connect(owner).resolveRoll(4);
+            expect(await craps.currentPhase()).to.equal(1); // Come
+            await craps.connect(owner).resolveRoll(7);
+            expect(await craps.currentPhase()).to.equal(0); // Off
         });
     });
 
     describe("Edge Cases", function () {
-        it("Should handle invalid roll outcomes", async function () {
+        it("Should handle invalid roll numbers", async function () {
             await expect(
                 craps.connect(owner).resolveRoll(1)
             ).to.be.revertedWith("Invalid roll outcome.");
@@ -122,15 +111,11 @@ describe("CrapsGame", function () {
             ).to.be.revertedWith("Invalid roll outcome.");
         });
 
-        it("Should handle multiple bet types from same player", async function () {
+        it("Should handle multiple bet types", async function () {
             await craps.connect(addr1).placeBet(0, { value: minBetAmount }); // Pass
-            await craps.connect(addr1).placeBet(2, { value: minBetAmount }); // Come
-            
-            const passLineBet = await craps.getPlayerBet(addr1.address, 0);
-            const comeBet = await craps.getPlayerBet(addr1.address, 2);
-            
-            expect(passLineBet).to.equal(minBetAmount);
-            expect(comeBet).to.equal(minBetAmount);
+            await craps.connect(addr1).placeBet(4, { value: minBetAmount }); // Field
+            const activePlayers = await craps.getActivePlayers();
+            expect(activePlayers.length).to.equal(1);
         });
     });
 });

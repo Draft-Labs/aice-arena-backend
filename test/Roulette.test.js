@@ -9,25 +9,23 @@ describe("Roulette", function () {
     let owner;
     let addr1;
     let addr2;
-    const minBetAmount = ethers.utils.parseEther("0.01");
+    const minBetAmount = ethers.parseEther("0.01");
 
     beforeEach(async function () {
         [owner, addr1, addr2] = await ethers.getSigners();
         
         // Deploy Treasury
         HouseTreasury = await ethers.getContractFactory("HouseTreasury");
-        treasury = await HouseTreasury.deploy();
-        await treasury.deployed();
-
+        treasury = await (await HouseTreasury.deploy()).waitForDeployment();
+        
         // Deploy Roulette
         Roulette = await ethers.getContractFactory("Roulette");
-        roulette = await Roulette.deploy(minBetAmount, treasury.address);
-        await roulette.deployed();
-
+        roulette = await (await Roulette.deploy(minBetAmount, treasury.getAddress())).waitForDeployment();
+        
         // Setup
-        await treasury.connect(owner).authorizeGame(roulette.address);
+        await treasury.connect(owner).authorizeGame(await roulette.getAddress());
         await treasury.connect(owner).fundTreasury({ 
-            value: ethers.utils.parseEther("100.0") 
+            value: ethers.parseEther("100.0") 
         });
     });
 
@@ -41,7 +39,7 @@ describe("Roulette", function () {
         });
 
         it("Should set the correct treasury address", async function () {
-            expect(await roulette.treasury()).to.equal(treasury.address);
+            expect(await roulette.treasury()).to.equal(await treasury.getAddress());
         });
     });
 
@@ -91,7 +89,7 @@ describe("Roulette", function () {
         it("Should reject bet below minimum", async function () {
             await expect(
                 roulette.connect(addr1).placeBet(0, [17], { 
-                    value: ethers.utils.parseEther("0.005") 
+                    value: ethers.parseEther("0.005") 
                 })
             ).to.be.revertedWith("Bet amount is below minimum required.");
         });
@@ -103,14 +101,14 @@ describe("Roulette", function () {
         });
 
         it("Should resolve winning straight bet correctly", async function () {
-            const initialBalance = await addr1.getBalance();
+            const initialBalance = await ethers.provider.getBalance(addr1.address);
             await roulette.connect(owner).spin(17);
-            const finalBalance = await addr1.getBalance();
+            const finalBalance = await ethers.provider.getBalance(addr1.address);
             
-            // Straight bet pays 35:1
-            expect(finalBalance.sub(initialBalance)).to.be.closeTo(
-                minBetAmount.mul(36),
-                ethers.utils.parseEther("0.001") // Allow for gas costs
+            // Straight bet pays 35:1 plus original bet (36x total)
+            expect(finalBalance).to.be.closeTo(
+                initialBalance + (minBetAmount * BigInt(36)),
+                ethers.parseEther("0.001") // Allow for gas costs
             );
         });
 
@@ -121,10 +119,10 @@ describe("Roulette", function () {
         });
 
         it("Should handle losing bets correctly", async function () {
-            const initialBalance = await addr1.getBalance();
+            const initialBalance = await ethers.provider.getBalance(addr1.address);
             await roulette.connect(owner).spin(18);
-            const finalBalance = await addr1.getBalance();
-            expect(finalBalance).to.be.closeTo(initialBalance, ethers.utils.parseEther("0.001"));
+            const finalBalance = await ethers.provider.getBalance(addr1.address);
+            expect(finalBalance).to.be.closeTo(initialBalance, ethers.parseEther("0.001"));
         });
     });
 
@@ -155,7 +153,7 @@ describe("Roulette", function () {
             await roulette.connect(addr1).placeBet(7, [], { value: minBetAmount }); // Red
             await roulette.connect(owner).spin(0);
             const bets = await roulette.getPlayerBets(addr1.address);
-            expect(bets.length).to.equal(0);
+            expect(bets.length).to.equal(0); // Ensure bets are cleared
         });
     });
 

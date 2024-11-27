@@ -7,14 +7,13 @@ async function main() {
 
     // Fetch balance to verify deployment account has funds
     const balance = await deployer.getBalance();
-    console.log("Account balance:", ethers.utils.formatEther(balance));
+    console.log("Account balance:", ethers.formatEther(balance));
 
     // Get the Blackjack contract factory
     const Blackjack = await ethers.getContractFactory("Blackjack");
 
     // Deploy the Blackjack contract (change the minimum bet amount if needed)
-    const blackjack = await Blackjack.deploy(ethers.utils.parseEther("0.01"));
-    await blackjack.deployed();
+    const blackjack = await Blackjack.deploy(ethers.parseEther("0.01"));
     console.log("Blackjack deployed to:", blackjack.address);
 
     // Get the CrapsGame contract factory
@@ -22,7 +21,6 @@ async function main() {
 
     // Deploy the CrapsGame contract
     const crapsGame = await CrapsGame.deploy();
-    await crapsGame.deployed();
     console.log("CrapsGame deployed to:", crapsGame.address);
 }
 

@@ -6,38 +6,71 @@ contract Blackjack {
     address public owner;
     uint256 public minBetAmount;
     HouseTreasury public treasury;
-    mapping(address => uint256) public playerBets;
+    
+    struct PlayerHand {
+        uint256 bet;
+        uint8[] cards;
+        bool resolved;
+    }
+    
+    mapping(address => PlayerHand) public playerHands;
+    address[] private activePlayers;
 
-    // Constructor to set the contract owner and the minimum bet amount
+    event BetPlaced(address indexed player, uint256 amount);
+    event GameResolved(address indexed player, uint256 winnings);
+    event CardDealt(address indexed player, uint8 card);
+
     constructor(uint256 _minBetAmount, address _treasuryAddress) {
         owner = msg.sender;
         minBetAmount = _minBetAmount;
         treasury = HouseTreasury(_treasuryAddress);
     }
 
-    // Modifier to restrict functions to only the owner
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner can call this function.");
         _;
     }
 
-    // Function to place a bet
     function placeBet() external payable {
         require(msg.value >= minBetAmount, "Bet amount is below the minimum required.");
-        require(playerBets[msg.sender] == 0, "Player already has an active bet.");
+        require(playerHands[msg.sender].bet == 0, "Player already has an active bet.");
 
-        playerBets[msg.sender] = msg.value;
+        playerHands[msg.sender] = PlayerHand({
+            bet: msg.value,
+            cards: new uint8[](0),
+            resolved: false
+        });
+        activePlayers.push(msg.sender);
+        
+        emit BetPlaced(msg.sender, msg.value);
     }
 
-    // Function to clear bet after game is resolved (called off-chain after the result is computed)
-    function clearBet(address player) external onlyOwner {
-        playerBets[player] = 0;
+    // Function to resolve all active games and process payouts
+    function resolveGames(address[] calldata winners, uint8[] calldata multipliers) external onlyOwner {
+        require(winners.length == multipliers.length, "Arrays length mismatch");
+        
+        for (uint256 i = 0; i < winners.length; i++) {
+            address player = winners[i];
+            require(playerHands[player].bet > 0, "No active bet for player");
+            require(!playerHands[player].resolved, "Game already resolved");
+            
+            uint256 winnings = playerHands[player].bet * multipliers[i];
+            if (winnings > 0) {
+                treasury.payout(player, winnings);
+                emit GameResolved(player, winnings);
+            }
+            
+            playerHands[player].resolved = true;
+        }
+        
+        // Clear all active games
+        for (uint256 i = 0; i < activePlayers.length; i++) {
+            delete playerHands[activePlayers[i]];
+        }
+        delete activePlayers;
     }
 
-    // Updated payout function
-    function payoutWinnings(address winner, uint256 amount) external onlyOwner {
-        require(playerBets[winner] > 0, "Player does not have an active bet.");
-        playerBets[winner] = 0;
-        treasury.payout(winner, amount);
+    function getActivePlayers() external view returns (address[] memory) {
+        return activePlayers;
     }
 }

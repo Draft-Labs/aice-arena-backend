@@ -33,6 +33,9 @@ contract Roulette {
     mapping(address => Bet[]) public playerBets;
     uint8[] public redNumbers = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
 
+    // Add a state variable to track players with active bets
+    address[] private activePlayers;
+
     event BetPlaced(address indexed player, BetType betType, uint256 amount, uint8[] numbers);
     event SpinResult(uint8 number);
     event Payout(address indexed player, uint256 amount);
@@ -52,6 +55,11 @@ contract Roulette {
         require(msg.value >= minBetAmount, "Bet amount is below minimum required.");
         require(isValidBet(betType, numbers), "Invalid bet configuration.");
 
+        // Add player to activePlayers if not already present
+        if (playerBets[msg.sender].length == 0) {
+            activePlayers.push(msg.sender);
+        }
+
         playerBets[msg.sender].push(Bet({
             player: msg.sender,
             betType: betType,
@@ -66,12 +74,9 @@ contract Roulette {
         require(result <= 36, "Invalid roulette number.");
         emit SpinResult(result);
 
-        // Get all players who have placed bets
-        address[] memory players = getActivePlayers();
-
         // Process bets for each player
-        for (uint256 p = 0; p < players.length; p++) {
-            address player = players[p];
+        for (uint256 p = 0; p < activePlayers.length; p++) {
+            address player = activePlayers[p];
             Bet[] storage playerBetList = playerBets[player];
 
             // Process all bets for this player
@@ -88,28 +93,13 @@ contract Roulette {
             // Clear all bets for this player
             delete playerBets[player];
         }
+
+        // Clear the active players list
+        delete activePlayers;
     }
 
-    // Helper function to get all players with active bets
+    // Modify the getActivePlayers function to use the activePlayers list
     function getActivePlayers() internal view returns (address[] memory) {
-        // First, count the number of active players
-        uint256 count = 0;
-        address[] memory tempPlayers = new address[](1000); // Arbitrary max size
-
-        for (uint256 i = 0; i < tempPlayers.length; i++) {
-            address player = tempPlayers[i];
-            if (playerBets[player].length > 0) {
-                tempPlayers[count] = player;
-                count++;
-            }
-        }
-
-        // Create correctly sized array
-        address[] memory activePlayers = new address[](count);
-        for (uint256 i = 0; i < count; i++) {
-            activePlayers[i] = tempPlayers[i];
-        }
-
         return activePlayers;
     }
 
