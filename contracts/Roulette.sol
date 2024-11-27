@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT 
 pragma solidity ^0.8.0;
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./HouseTreasury.sol";
 
-contract Roulette {
+contract Roulette is ReentrancyGuard {
     address public owner;
     uint256 public minBetAmount;
     HouseTreasury public treasury;
@@ -30,15 +31,46 @@ contract Roulette {
         uint8[] numbers;    // Numbers covered by the bet
     }
 
+    // Create temporary storage for winnings
+    struct WinningInfo {
+        address player;
+        uint256 amount;
+    }
+
     mapping(address => Bet[]) public playerBets;
     uint8[] public redNumbers = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
 
     // Add a state variable to track players with active bets
     address[] private activePlayers;
 
+    mapping(address => uint256) private pendingWithdrawals;
+    mapping(address => bool) private activeGames;
+    bool private resolving;
+
     event BetPlaced(address indexed player, BetType betType, uint256 amount, uint8[] numbers);
     event SpinResult(uint8 number);
     event Payout(address indexed player, uint256 amount);
+
+    bool private paused;
+    uint256 private maxWithdrawalAmount = 10 ether;
+    mapping(address => uint256) private lastActionTime;
+    uint256 private actionCooldown = 1 minutes;
+
+    modifier whenNotPaused() {
+        require(!paused, "Contract is paused");
+        _;
+    }
+
+    modifier rateLimited() {
+        require(block.timestamp >= lastActionTime[msg.sender] + actionCooldown, "Action rate limited");
+        _;
+        lastActionTime[msg.sender] = block.timestamp;
+    }
+
+    modifier circuitBreaker(uint256 amount) {
+        require(amount <= maxWithdrawalAmount, "Withdrawal amount exceeds limit");
+        _;
+    }
 
     constructor(uint256 _minBetAmount, address _treasuryAddress) {
         owner = msg.sender;
@@ -51,7 +83,18 @@ contract Roulette {
         _;
     }
 
-    function placeBet(BetType betType, uint8[] calldata numbers) external payable {
+    modifier noActiveGame() {
+        require(!activeGames[msg.sender], "Player already in an active game");
+        _;
+    }
+
+    modifier notResolving() {
+        require(!resolving, "Resolution in progress");
+        _;
+    }
+
+    function placeBet(BetType betType, uint8[] calldata numbers) external payable nonReentrant noActiveGame whenNotPaused rateLimited {
+        activeGames[msg.sender] = true;
         require(msg.value >= minBetAmount, "Bet amount is below minimum required.");
         require(isValidBet(betType, numbers), "Invalid bet configuration.");
 
@@ -70,32 +113,45 @@ contract Roulette {
         emit BetPlaced(msg.sender, betType, msg.value, numbers);
     }
 
-    function spin(uint8 result) external onlyOwner {
+    function spin(uint8 result) external onlyOwner nonReentrant notResolving {
+        resolving = true;
         require(result <= 36, "Invalid roulette number.");
         emit SpinResult(result);
 
-        // Process bets for each player
+        WinningInfo[] memory winnings = new WinningInfo[](activePlayers.length * 10); // Assuming max 10 bets per player
+        uint256 winningCount = 0;
+
+        // First calculate all winnings and update state
         for (uint256 p = 0; p < activePlayers.length; p++) {
             address player = activePlayers[p];
             Bet[] storage playerBetList = playerBets[player];
 
-            // Process all bets for this player
             for (uint256 i = 0; i < playerBetList.length; i++) {
                 Bet memory bet = playerBetList[i];
-                uint256 winnings = calculateWinnings(bet, result);
+                uint256 winningAmount = calculateWinnings(bet, result);
                 
-                if (winnings > 0) {
-                    treasury.payout(bet.player, winnings);
-                    emit Payout(bet.player, winnings);
+                if (winningAmount > 0) {
+                    winnings[winningCount] = WinningInfo({
+                        player: bet.player,
+                        amount: winningAmount
+                    });
+                    winningCount++;
                 }
             }
-
-            // Clear all bets for this player
+            
+            // Clear player's bets
             delete playerBets[player];
         }
 
         // Clear the active players list
         delete activePlayers;
+
+        // Finally, process all payouts
+        for (uint256 i = 0; i < winningCount; i++) {
+            treasury.payout(winnings[i].player, winnings[i].amount);
+            emit Payout(winnings[i].player, winnings[i].amount);
+        }
+        resolving = false;
     }
 
     // Modify the getActivePlayers function to use the activePlayers list
@@ -167,4 +223,23 @@ contract Roulette {
 
     // Allow contract to receive funds
     receive() external payable {}
+
+    function withdrawWinnings() external nonReentrant circuitBreaker(pendingWithdrawals[msg.sender]) {
+        uint256 amount = pendingWithdrawals[msg.sender];
+        require(amount > 0, "No winnings to withdraw");
+
+        pendingWithdrawals[msg.sender] = 0;
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "Transfer failed");
+    }
+
+    function pause() external onlyOwner {
+        paused = true;
+        emit ContractPaused();
+    }
+
+    function unpause() external onlyOwner {
+        paused = false;
+        emit ContractUnpaused();
+    }
 }

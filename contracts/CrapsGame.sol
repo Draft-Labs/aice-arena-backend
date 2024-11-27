@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT 
 pragma solidity ^0.8.0;
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./HouseTreasury.sol";
 
-contract CrapsGame {
+contract CrapsGame is ReentrancyGuard {
     address public owner;
     uint256 public minBetAmount;
     HouseTreasury public treasury;
@@ -22,10 +23,22 @@ contract CrapsGame {
     GamePhase public currentPhase;
     uint8 public point;
 
+    mapping(address => uint256) private pendingWithdrawals;
+    mapping(address => bool) private activeGames;
+    bool private resolving;
+
+    bool private paused;
+    uint256 private maxWithdrawalAmount = 10 ether;
+    mapping(address => uint256) private lastActionTime;
+    uint256 private actionCooldown = 1 minutes;
+
     event BetPlaced(address indexed player, BetType betType, uint256 amount);
     event GameResolved(address indexed player, uint256 winnings);
     event PointEstablished(uint8 point);
     event RollResult(uint8 roll);
+    event ContractPaused();
+    event ContractUnpaused();
+    event BetResolved(address indexed player, uint256 amount);
 
     constructor(uint256 _minBetAmount, address _treasuryAddress) {
         owner = msg.sender;
@@ -39,7 +52,44 @@ contract CrapsGame {
         _;
     }
 
-    function placeBet(BetType betType) external payable {
+    modifier noActiveGame() {
+        require(!activeGames[msg.sender], "Player already in an active game");
+        _;
+    }
+
+    modifier notResolving() {
+        require(!resolving, "Resolution in progress");
+        _;
+    }
+
+    modifier whenNotPaused() {
+        require(!paused, "Contract is paused");
+        _;
+    }
+
+    modifier rateLimited() {
+        require(block.timestamp >= lastActionTime[msg.sender] + actionCooldown, "Action rate limited");
+        _;
+        lastActionTime[msg.sender] = block.timestamp;
+    }
+
+    modifier circuitBreaker(uint256 amount) {
+        require(amount <= maxWithdrawalAmount, "Withdrawal amount exceeds limit");
+        _;
+    }
+
+    function pause() external onlyOwner {
+        paused = true;
+        emit ContractPaused();
+    }
+
+    function unpause() external onlyOwner {
+        paused = false;
+        emit ContractUnpaused();
+    }
+
+    function placeBet(BetType betType) external payable nonReentrant noActiveGame whenNotPaused rateLimited {
+        activeGames[msg.sender] = true;
         require(msg.value >= minBetAmount, "Bet amount is below minimum required.");
         require(playerBets[msg.sender][betType].amount == 0, "Player already has an active bet of this type.");
 
@@ -57,10 +107,17 @@ contract CrapsGame {
         emit BetPlaced(msg.sender, betType, msg.value);
     }
 
-    function resolveRoll(uint8 rollOutcome) external onlyOwner {
+    function resolveRoll(uint8 rollOutcome) external onlyOwner nonReentrant notResolving {
+        resolving = true;
         require(rollOutcome >= 2 && rollOutcome <= 12, "Invalid roll outcome.");
         emit RollResult(rollOutcome);
 
+        // Create temporary storage for winnings
+        address[] memory winners = new address[](activePlayers.length);
+        uint256[] memory winningAmounts = new uint256[](activePlayers.length);
+        uint256 winnerCount = 0;
+
+        // First, calculate all winnings and update state
         for (uint256 i = 0; i < activePlayers.length; i++) {
             address player = activePlayers[i];
             
@@ -71,20 +128,28 @@ contract CrapsGame {
                 if (bet.amount > 0 && !bet.resolved) {
                     uint256 winnings = calculateWinnings(bet, rollOutcome);
                     if (winnings > 0) {
-                        treasury.payout(player, winnings);
-                        emit GameResolved(player, winnings);
+                        winners[winnerCount] = player;
+                        winningAmounts[winnerCount] = winnings;
+                        winnerCount++;
                     }
-                    // Mark bet as resolved regardless of win/loss
+                    // Mark bet as resolved
                     bet.resolved = true;
                 }
             }
         }
 
-        // Update game phase and point based on roll
+        // Update game state
         updateGameState(rollOutcome);
         
         // Clear resolved bets
         clearResolvedBets();
+
+        // Finally, process all payouts
+        for (uint256 i = 0; i < winnerCount; i++) {
+            treasury.payout(winners[i], winningAmounts[i]);
+            emit GameResolved(winners[i], winningAmounts[i]);
+        }
+        resolving = false;
     }
 
     function calculateWinnings(Bet memory bet, uint8 roll) internal pure returns (uint256) {
@@ -158,5 +223,14 @@ contract CrapsGame {
 
     function getActivePlayers() external view returns (address[] memory) {
         return activePlayers;
+    }
+
+    function withdrawWinnings() external nonReentrant circuitBreaker(pendingWithdrawals[msg.sender]) {
+        uint256 amount = pendingWithdrawals[msg.sender];
+        require(amount > 0, "No winnings to withdraw");
+
+        pendingWithdrawals[msg.sender] = 0;
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "Transfer failed");
     }
 }
