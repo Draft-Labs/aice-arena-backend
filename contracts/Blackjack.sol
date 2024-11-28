@@ -86,31 +86,31 @@ contract Blackjack is ReentrancyGuard {
         emit ContractUnpaused();
     }
 
-    function placeBet() external payable nonReentrant noActiveGame whenNotPaused rateLimited {
-        activeGames[msg.sender] = true;
-        require(msg.value >= minBetAmount, "Bet amount is below the minimum required.");
-        require(playerHands[msg.sender].bet == 0, "Player already has an active bet.");
+    function placeBet() external nonReentrant noActiveGame whenNotPaused rateLimited {
+        require(treasury.canPlaceBet(msg.sender, minBetAmount), "Insufficient balance or no active account");
+        
+        // Process the bet amount from their treasury balance
+        treasury.processBetLoss(msg.sender, minBetAmount);
 
+        activeGames[msg.sender] = true;
         playerHands[msg.sender] = PlayerHand({
-            bet: msg.value,
+            bet: minBetAmount,
             cards: new uint8[](0),
             resolved: false
         });
         activePlayers.push(msg.sender);
         
-        emit BetPlaced(msg.sender, msg.value);
+        emit BetPlaced(msg.sender, minBetAmount);
     }
 
-    // Function to resolve all active games and process payouts
     function resolveGames(address[] calldata winners, uint8[] calldata multipliers) external onlyOwner nonReentrant notResolving {
         resolving = true;
         require(winners.length == multipliers.length, "Arrays length mismatch");
         
-        // Create temporary storage for winnings
         WinningInfo[] memory winnings = new WinningInfo[](winners.length);
         uint256 winningCount = 0;
 
-        // First calculate all winnings and update state
+        // Calculate all winnings and update state
         for (uint256 i = 0; i < winners.length; i++) {
             address player = winners[i];
             require(playerHands[player].bet > 0, "No active bet for player");
@@ -131,12 +131,13 @@ contract Blackjack is ReentrancyGuard {
         // Clear all active games
         for (uint256 i = 0; i < activePlayers.length; i++) {
             delete playerHands[activePlayers[i]];
+            activeGames[activePlayers[i]] = false;
         }
         delete activePlayers;
 
-        // Finally, process all payouts
+        // Process all payouts through treasury
         for (uint256 i = 0; i < winningCount; i++) {
-            treasury.payout(winnings[i].player, winnings[i].amount);
+            treasury.processBetWin(winnings[i].player, winnings[i].amount);
             emit GameResolved(winnings[i].player, winnings[i].amount);
         }
         resolving = false;
@@ -146,12 +147,7 @@ contract Blackjack is ReentrancyGuard {
         return activePlayers;
     }
 
-    function withdrawWinnings() external nonReentrant circuitBreaker(pendingWithdrawals[msg.sender]) {
-        uint256 amount = pendingWithdrawals[msg.sender];
-        require(amount > 0, "No winnings to withdraw");
-
-        pendingWithdrawals[msg.sender] = 0;
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "Transfer failed");
+    function setActionCooldown(uint256 _cooldown) external onlyOwner {
+        actionCooldown = _cooldown;
     }
 }

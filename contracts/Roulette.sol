@@ -92,9 +92,12 @@ contract Roulette is ReentrancyGuard {
         _;
     }
 
-    function placeBet(BetType betType, uint8[] calldata numbers) external payable nonReentrant whenNotPaused rateLimited {
-        require(msg.value >= minBetAmount, "Bet amount is below minimum required.");
+    function placeBet(BetType betType, uint8[] calldata numbers) external nonReentrant whenNotPaused rateLimited {
+        require(treasury.canPlaceBet(msg.sender, minBetAmount), "Insufficient balance or no active account");
         require(isValidBet(betType, numbers), "Invalid bet configuration.");
+
+        // Process the bet amount from their treasury balance
+        treasury.processBetLoss(msg.sender, minBetAmount);
 
         // Add player to activePlayers if not already present
         if (playerBets[msg.sender].length == 0) {
@@ -104,11 +107,11 @@ contract Roulette is ReentrancyGuard {
         playerBets[msg.sender].push(Bet({
             player: msg.sender,
             betType: betType,
-            amount: msg.value,
+            amount: minBetAmount,
             numbers: numbers
         }));
 
-        emit BetPlaced(msg.sender, betType, msg.value, numbers);
+        emit BetPlaced(msg.sender, betType, minBetAmount, numbers);
     }
 
     function spin(uint8 result) external onlyOwner nonReentrant notResolving {
@@ -144,9 +147,9 @@ contract Roulette is ReentrancyGuard {
         // Clear the active players list
         delete activePlayers;
 
-        // Finally, process all payouts
+        // Process all payouts through treasury
         for (uint256 i = 0; i < winningCount; i++) {
-            treasury.payout(winnings[i].player, winnings[i].amount);
+            treasury.processBetWin(winnings[i].player, winnings[i].amount);
             emit Payout(winnings[i].player, winnings[i].amount);
         }
         resolving = false;
@@ -157,11 +160,12 @@ contract Roulette is ReentrancyGuard {
         return activePlayers;
     }
 
-    function calculateWinnings(Bet memory bet, uint8 result) internal view returns (uint256) {
-        if (!isWinningBet(bet, result)) return 0;
-
-        uint256 multiplier = getMultiplier(bet.betType);
-        return bet.amount * multiplier;
+    function calculateWinnings(Bet memory bet, uint8 result) internal pure returns (uint256) {
+        if (bet.betType == BetType.Straight && bet.numbers[0] == result) {
+            return bet.amount * 36;
+        }
+        // Add other bet type calculations
+        return 0;
     }
 
     function isWinningBet(Bet memory bet, uint8 result) internal view returns (bool) {
@@ -217,18 +221,6 @@ contract Roulette is ReentrancyGuard {
 
     function getPlayerBets(address player) external view returns (Bet[] memory) {
         return playerBets[player];
-    }
-
-    // Allow contract to receive funds
-    receive() external payable {}
-
-    function withdrawWinnings() external nonReentrant circuitBreaker(pendingWithdrawals[msg.sender]) {
-        uint256 amount = pendingWithdrawals[msg.sender];
-        require(amount > 0, "No winnings to withdraw");
-
-        pendingWithdrawals[msg.sender] = 0;
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "Transfer failed");
     }
 
     function pause() external onlyOwner {

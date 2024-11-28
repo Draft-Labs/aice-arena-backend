@@ -84,14 +84,16 @@ contract Craps is ReentrancyGuard {
         emit ContractUnpaused();
     }
 
-    function placeBet(BetType betType) external payable nonReentrant whenNotPaused rateLimited {
-        require(msg.value >= minBetAmount, "Bet amount is below minimum required.");
-        require(playerBets[msg.sender][betType].amount == 0, "Player already has an active bet of this type.");
+    function placeBet(BetType betType) external nonReentrant whenNotPaused rateLimited {
+        require(treasury.canPlaceBet(msg.sender, minBetAmount), "Insufficient balance or no active account");
+
+        // Process the bet amount from their treasury balance
+        treasury.processBetLoss(msg.sender, minBetAmount);
 
         playerBets[msg.sender][betType] = Bet({
             player: msg.sender,
             betType: betType,
-            amount: msg.value,
+            amount: minBetAmount,
             resolved: false
         });
 
@@ -99,7 +101,7 @@ contract Craps is ReentrancyGuard {
             activePlayers.push(msg.sender);
         }
         
-        emit BetPlaced(msg.sender, betType, msg.value);
+        emit BetPlaced(msg.sender, betType, minBetAmount);
     }
 
     function resolveRoll(uint8 rollOutcome) external onlyOwner nonReentrant notResolving {
@@ -107,12 +109,10 @@ contract Craps is ReentrancyGuard {
         require(rollOutcome >= 2 && rollOutcome <= 12, "Invalid roll outcome.");
         emit RollResult(rollOutcome);
 
-        // Create temporary storage for winnings
         address[] memory winners = new address[](activePlayers.length);
         uint256[] memory winningAmounts = new uint256[](activePlayers.length);
         uint256 winnerCount = 0;
 
-        // First, calculate all winnings and update state
         for (uint256 i = 0; i < activePlayers.length; i++) {
             address player = activePlayers[i];
             
@@ -127,29 +127,23 @@ contract Craps is ReentrancyGuard {
                         winningAmounts[winnerCount] = winnings;
                         winnerCount++;
                     }
-                    // Mark bet as resolved
                     bet.resolved = true;
                 }
             }
         }
 
-        // Update game state
         updateGameState(rollOutcome);
-        
-        // Clear resolved bets
         clearResolvedBets();
 
-        // Finally, process all payouts
+        // Process all payouts through treasury
         for (uint256 i = 0; i < winnerCount; i++) {
-            treasury.payout(winners[i], winningAmounts[i]);
+            treasury.processBetWin(winners[i], winningAmounts[i]);
             emit GameResolved(winners[i], winningAmounts[i]);
         }
         resolving = false;
     }
 
     function calculateWinnings(Bet memory bet, uint8 roll) internal pure returns (uint256) {
-        // Add your winning calculation logic here based on bet type and roll
-        // This is a simplified example
         if (bet.betType == BetType.Pass && (roll == 7 || roll == 11)) {
             return bet.amount * 2;
         }
@@ -218,15 +212,6 @@ contract Craps is ReentrancyGuard {
 
     function getActivePlayers() external view returns (address[] memory) {
         return activePlayers;
-    }
-
-    function withdrawWinnings() external nonReentrant circuitBreaker(pendingWithdrawals[msg.sender]) {
-        uint256 amount = pendingWithdrawals[msg.sender];
-        require(amount > 0, "No winnings to withdraw");
-
-        pendingWithdrawals[msg.sender] = 0;
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "Transfer failed");
     }
 
     function setActionCooldown(uint256 _cooldown) external onlyOwner {
