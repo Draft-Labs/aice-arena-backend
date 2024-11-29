@@ -39,6 +39,10 @@ contract Blackjack is ReentrancyGuard {
     event ContractUnpaused();
     event BetResolved(address indexed player, uint256 amount);
 
+    error PlayerAlreadyHasActiveBet();
+    error OnlyOwnerAllowed();
+    error ActionRateLimited();
+
     constructor(uint256 _minBetAmount, address payable _treasuryAddress) {
         owner = msg.sender;
         minBetAmount = _minBetAmount;
@@ -46,12 +50,12 @@ contract Blackjack is ReentrancyGuard {
     }
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "Only owner can call this function.");
+        if (msg.sender != owner) revert OnlyOwnerAllowed();
         _;
     }
 
     modifier noActiveGame() {
-        require(!activeGames[msg.sender], "Player already has an active bet.");
+        if (activeGames[msg.sender]) revert PlayerAlreadyHasActiveBet();
         _;
     }
 
@@ -66,7 +70,8 @@ contract Blackjack is ReentrancyGuard {
     }
 
     modifier rateLimited() {
-        require(block.timestamp >= lastActionTime[msg.sender] + actionCooldown, "Action rate limited");
+        if (block.timestamp < lastActionTime[msg.sender] + actionCooldown) 
+            revert ActionRateLimited();
         _;
         lastActionTime[msg.sender] = block.timestamp;
     }
@@ -86,21 +91,22 @@ contract Blackjack is ReentrancyGuard {
         emit ContractUnpaused();
     }
 
-    function placeBet() external nonReentrant noActiveGame whenNotPaused rateLimited {
-        require(treasury.canPlaceBet(msg.sender, minBetAmount), "Insufficient balance or no active account");
+    function placeBet() external payable nonReentrant noActiveGame whenNotPaused rateLimited {
+        require(msg.value >= minBetAmount, "Bet amount too low");
+        require(treasury.canPlaceBet(msg.sender, msg.value), "Insufficient balance or no active account");
         
         // Process the bet amount from their treasury balance
-        treasury.processBetLoss(msg.sender, minBetAmount);
+        treasury.processBetLoss(msg.sender, msg.value);
 
         activeGames[msg.sender] = true;
         playerHands[msg.sender] = PlayerHand({
-            bet: minBetAmount,
+            bet: msg.value,
             cards: new uint8[](0),
             resolved: false
         });
         activePlayers.push(msg.sender);
         
-        emit BetPlaced(msg.sender, minBetAmount);
+        emit BetPlaced(msg.sender, msg.value);
     }
 
     function resolveGames(address[] calldata winners, uint8[] calldata multipliers) external onlyOwner nonReentrant notResolving {

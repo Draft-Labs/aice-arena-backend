@@ -21,6 +21,7 @@ describe("Craps", function () {
         craps = await (await Craps.deploy(minBetAmount, treasury.getAddress())).waitForDeployment();
         
         await treasury.connect(owner).authorizeGame(await craps.getAddress());
+        await treasury.connect(owner).fundHouseTreasury({ value: ethers.parseEther("100.0") });
         await treasury.connect(addr1).openAccount({ value: ethers.parseEther("1.0") });
         await craps.connect(owner).setActionCooldown(0);
     });

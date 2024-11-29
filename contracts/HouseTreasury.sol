@@ -8,6 +8,7 @@ contract HouseTreasury is ReentrancyGuard {
     mapping(address => uint256) public playerBalances;
     mapping(address => bool) public activeAccounts;
     bool private paused;
+    uint256 public houseFunds;
 
     event GameAuthorized(address gameContract);
     event GameDeauthorized(address gameContract);
@@ -17,6 +18,8 @@ contract HouseTreasury is ReentrancyGuard {
     event BalanceUpdated(address indexed player, uint256 newBalance);
     event ContractPaused();
     event ContractUnpaused();
+    event HouseFunded(uint256 amount);
+    event HouseWithdrawn(uint256 amount);
 
     constructor() {
         owner = msg.sender;
@@ -84,12 +87,15 @@ contract HouseTreasury is ReentrancyGuard {
         onlyAuthorizedGame {
         require(playerBalances[player] >= amount, "Insufficient balance");
         playerBalances[player] -= amount;
+        houseFunds += amount;
         emit BalanceUpdated(player, playerBalances[player]);
     }
 
     // Called by games when a player wins a bet
     function processBetWin(address player, uint256 amount) external 
         onlyAuthorizedGame {
+        require(houseFunds >= amount, "Insufficient house funds for payout");
+        houseFunds -= amount;
         playerBalances[player] += amount;
         emit BalanceUpdated(player, playerBalances[player]);
     }
@@ -133,5 +139,30 @@ contract HouseTreasury is ReentrancyGuard {
         require(success, "Transfer failed");
         
         emit BalanceUpdated(msg.sender, playerBalances[msg.sender]);
+    }
+
+    // Owner can add funds to house treasury
+    function fundHouseTreasury() external payable onlyOwner {
+        require(msg.value > 0, "Must fund with some ETH");
+        houseFunds += msg.value;
+        emit HouseFunded(msg.value);
+    }
+
+    // Owner can withdraw funds from house treasury
+    function withdrawHouseFunds(uint256 amount) external onlyOwner nonReentrant {
+        require(amount > 0, "Must withdraw some ETH");
+        require(amount <= houseFunds, "Insufficient house funds");
+        
+        houseFunds -= amount;
+        
+        (bool success, ) = owner.call{value: amount}("");
+        require(success, "Transfer failed");
+        
+        emit HouseWithdrawn(amount);
+    }
+
+    // Get current house treasury balance
+    function getHouseFunds() external view returns (uint256) {
+        return houseFunds;
     }
 }

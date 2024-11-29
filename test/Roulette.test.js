@@ -21,6 +21,7 @@ describe("Roulette", function () {
         roulette = await (await Roulette.deploy(minBetAmount, treasury.getAddress())).waitForDeployment();
         
         await treasury.connect(owner).authorizeGame(await roulette.getAddress());
+        await treasury.connect(owner).fundHouseTreasury({ value: ethers.parseEther("100.0") });
         await treasury.connect(addr1).openAccount({ value: ethers.parseEther("1.0") });
         await roulette.connect(owner).setActionCooldown(0);
     });

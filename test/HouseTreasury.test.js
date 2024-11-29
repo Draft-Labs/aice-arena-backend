@@ -92,6 +92,7 @@ describe("HouseTreasury", function () {
         beforeEach(async function () {
             await treasury.connect(owner).authorizeGame(addr1.address);
             await treasury.connect(addr2).openAccount({ value: ethers.parseEther("1.0") });
+            await treasury.connect(owner).fundHouseTreasury({ value: ethers.parseEther("100.0") });
         });
 
         it("Should allow authorized game to process bet loss", async function () {
@@ -107,6 +108,69 @@ describe("HouseTreasury", function () {
         it("Should verify if player can place bet", async function () {
             expect(await treasury.connect(addr1).canPlaceBet(addr2.address, ethers.parseEther("0.5"))).to.be.true;
             expect(await treasury.connect(addr1).canPlaceBet(addr2.address, ethers.parseEther("1.5"))).to.be.false;
+        });
+    });
+
+    describe("House Treasury Management", function () {
+        it("Should allow owner to fund house treasury", async function () {
+            await treasury.connect(owner).fundHouseTreasury({ value: ethers.parseEther("10.0") });
+            expect(await treasury.getHouseFunds()).to.equal(ethers.parseEther("10.0"));
+        });
+
+        it("Should allow owner to withdraw house funds", async function () {
+            await treasury.connect(owner).fundHouseTreasury({ value: ethers.parseEther("10.0") });
+            await treasury.connect(owner).withdrawHouseFunds(ethers.parseEther("5.0"));
+            expect(await treasury.getHouseFunds()).to.equal(ethers.parseEther("5.0"));
+        });
+
+        it("Should reject non-owner attempts to fund house treasury", async function () {
+            await expect(
+                treasury.connect(addr1).fundHouseTreasury({ value: ethers.parseEther("1.0") })
+            ).to.be.revertedWith("Only owner can call this function.");
+        });
+
+        it("Should reject non-owner attempts to withdraw house funds", async function () {
+            await expect(
+                treasury.connect(addr1).withdrawHouseFunds(ethers.parseEther("1.0"))
+            ).to.be.revertedWith("Only owner can call this function.");
+        });
+
+        it("Should reject withdrawals greater than house funds", async function () {
+            await treasury.connect(owner).fundHouseTreasury({ value: ethers.parseEther("1.0") });
+            await expect(
+                treasury.connect(owner).withdrawHouseFunds(ethers.parseEther("2.0"))
+            ).to.be.revertedWith("Insufficient house funds");
+        });
+
+        describe("Bet Processing with House Funds", function () {
+            beforeEach(async function () {
+                await treasury.connect(owner).fundHouseTreasury({ value: ethers.parseEther("10.0") });
+                await treasury.connect(owner).authorizeGame(addr1.address);
+                await treasury.connect(addr2).openAccount({ value: ethers.parseEther("1.0") });
+            });
+
+            it("Should update house funds on player loss", async function () {
+                const initialHouseFunds = await treasury.getHouseFunds();
+                await treasury.connect(addr1).processBetLoss(addr2.address, ethers.parseEther("0.1"));
+                expect(await treasury.getHouseFunds()).to.equal(
+                    initialHouseFunds + ethers.parseEther("0.1")
+                );
+            });
+
+            it("Should update house funds on player win", async function () {
+                const initialHouseFunds = await treasury.getHouseFunds();
+                await treasury.connect(addr1).processBetWin(addr2.address, ethers.parseEther("0.2"));
+                expect(await treasury.getHouseFunds()).to.equal(
+                    initialHouseFunds - ethers.parseEther("0.2")
+                );
+            });
+
+            it("Should reject bet wins if house funds are insufficient", async function () {
+                await treasury.connect(owner).withdrawHouseFunds(ethers.parseEther("9.9"));
+                await expect(
+                    treasury.connect(addr1).processBetWin(addr2.address, ethers.parseEther("0.2"))
+                ).to.be.revertedWith("Insufficient house funds for payout");
+            });
         });
     });
 });
