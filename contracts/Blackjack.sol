@@ -101,7 +101,9 @@ contract Blackjack is ReentrancyGuard {
             revert BetBelowMinimum();
         if (isPlayerActive[msg.sender]) 
             revert PlayerAlreadyHasActiveBet();
-        if (!treasury.canPlaceBet(msg.sender, msg.value))
+
+        // Check if treasury has enough funds to cover potential win
+        if (treasury.getHouseFunds() < msg.value * 2)
             revert InsufficientTreasuryBalance();
 
         // Update player state
@@ -116,13 +118,18 @@ contract Blackjack is ReentrancyGuard {
         activePlayers.push(msg.sender);
         lastActionTime[msg.sender] = block.timestamp;
 
-        // Process bet in treasury
-        treasury.processBetLoss(msg.sender, msg.value);
+        // Transfer bet to treasury
+        (bool success, ) = address(treasury).call{value: msg.value}("");
+        require(success, "Failed to transfer bet to treasury");
         
         emit BetPlaced(msg.sender, msg.value);
     }
 
-    function resolveGames(address[] calldata players, uint256[] calldata multipliers) external onlyOwner {
+    function resolveGames(address[] calldata players, uint256[] calldata multipliers) 
+        external 
+        onlyOwner 
+        whenNotPaused 
+    {
         require(players.length == multipliers.length, "Arrays must be same length");
         
         for (uint256 i = 0; i < players.length; i++) {
@@ -131,13 +138,20 @@ contract Blackjack is ReentrancyGuard {
             uint256 bet = playerHands[player].bet;
             
             if (multiplier > 0) {
-                uint256 winnings = bet * multiplier;
-                treasury.processBetWin(player, winnings);
-                emit GameResolved(player, winnings);
+                // For wins (multiplier = 2) or pushes (multiplier = 1)
+                uint256 payout = bet * multiplier;
+                treasury.payoutToPlayer(player, payout);
+                emit GameResolved(player, payout);
             }
+            // For losses (multiplier = 0), bet stays in treasury
             
             // Clear player state
-            delete playerHands[player];
+            playerHands[player] = PlayerHand({
+                bet: 0,
+                cards: new uint8[](0),
+                resolved: false
+            });
+            
             activeGames[player] = false;
             isPlayerActive[player] = false;
             
@@ -158,5 +172,18 @@ contract Blackjack is ReentrancyGuard {
 
     function setActionCooldown(uint256 _cooldown) external onlyOwner {
         actionCooldown = _cooldown;
+    }
+
+    // Add a helper function to get a clean player hand
+    function getPlayerHand(address player) external view returns (PlayerHand memory) {
+        PlayerHand memory hand = playerHands[player];
+        if (hand.cards.length == 0) {
+            return PlayerHand({
+                bet: 0,
+                cards: new uint8[](0),
+                resolved: false
+            });
+        }
+        return hand;
     }
 }

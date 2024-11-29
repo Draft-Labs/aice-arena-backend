@@ -27,10 +27,26 @@ async function main() {
   console.log("Craps deployed to:", await craps.getAddress());
 
   // Authorize games in treasury
-  await treasury.authorizeGame(await blackjack.getAddress());
-  await treasury.authorizeGame(await roulette.getAddress());
-  await treasury.authorizeGame(await craps.getAddress());
-  console.log("Games authorized in treasury");
+  console.log("Authorizing games in treasury...");
+  
+  // Check current authorization
+  const blackjackAuthorized = await treasury.authorizedGames(await blackjack.getAddress());
+  if (!blackjackAuthorized) {
+    await treasury.authorizeGame(await blackjack.getAddress());
+    console.log("Blackjack authorized in treasury");
+  }
+
+  // Fund treasury
+  console.log("Funding treasury...");
+  await treasury.fundHouseTreasury({ value: ethers.parseEther("100") });
+  console.log("Treasury funded with 100 ETH");
+
+  // Log final setup
+  console.log("Final contract setup:");
+  console.log("Treasury address:", await treasury.getAddress());
+  console.log("Blackjack address:", await blackjack.getAddress());
+  console.log("Blackjack authorized:", await treasury.authorizedGames(await blackjack.getAddress()));
+  console.log("Treasury balance:", ethers.formatEther(await treasury.getHouseFunds()), "ETH");
 }
 
 main().catch((error) => {

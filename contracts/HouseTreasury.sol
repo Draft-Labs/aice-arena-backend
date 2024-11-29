@@ -125,7 +125,7 @@ contract HouseTreasury is ReentrancyGuard {
     }
 
     receive() external payable {
-        revert("Use openAccount() or deposit() to add funds");
+        houseFunds += msg.value;
     }
 
     // Players can withdraw some ETH from their account
@@ -164,5 +164,17 @@ contract HouseTreasury is ReentrancyGuard {
     // Get current house treasury balance
     function getHouseFunds() external view returns (uint256) {
         return houseFunds;
+    }
+
+    // Add function to handle direct payouts to players
+    function payoutToPlayer(address player, uint256 amount) external nonReentrant {
+        require(authorizedGames[msg.sender], "Only authorized games can call this function");
+        require(amount <= houseFunds, "Insufficient house funds for payout");
+        
+        houseFunds -= amount;
+        (bool success, ) = player.call{value: amount}("");
+        require(success, "Transfer failed");
+        
+        emit BalanceUpdated(player, amount);
     }
 }
