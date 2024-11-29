@@ -21,6 +21,7 @@ contract Blackjack is ReentrancyGuard {
     }
     
     mapping(address => PlayerHand) public playerHands;
+    mapping(address => bool) public isPlayerActive;
     address[] private activePlayers;
 
     mapping(address => uint256) private pendingWithdrawals;
@@ -39,9 +40,13 @@ contract Blackjack is ReentrancyGuard {
     event ContractUnpaused();
     event BetResolved(address indexed player, uint256 amount);
 
+    error BetBelowMinimum();
+    error InsufficientTreasuryBalance();
     error PlayerAlreadyHasActiveBet();
-    error OnlyOwnerAllowed();
     error ActionRateLimited();
+    error GamePaused();
+    error OnlyOwnerAllowed();
+    error ResolutionInProgress();
 
     constructor(uint256 _minBetAmount, address payable _treasuryAddress) {
         owner = msg.sender;
@@ -60,12 +65,12 @@ contract Blackjack is ReentrancyGuard {
     }
 
     modifier notResolving() {
-        require(!resolving, "Resolution in progress");
+        if (resolving) revert ResolutionInProgress();
         _;
     }
 
     modifier whenNotPaused() {
-        require(!paused, "Contract is paused");
+        if (paused) revert GamePaused();
         _;
     }
 
@@ -91,62 +96,60 @@ contract Blackjack is ReentrancyGuard {
         emit ContractUnpaused();
     }
 
-    function placeBet() external payable nonReentrant noActiveGame whenNotPaused rateLimited {
-        require(msg.value >= minBetAmount, "Bet amount too low");
-        require(treasury.canPlaceBet(msg.sender, msg.value), "Insufficient balance or no active account");
-        
-        // Process the bet amount from their treasury balance
-        treasury.processBetLoss(msg.sender, msg.value);
+    function placeBet() external payable nonReentrant whenNotPaused rateLimited {
+        if (msg.value < minBetAmount) 
+            revert BetBelowMinimum();
+        if (isPlayerActive[msg.sender]) 
+            revert PlayerAlreadyHasActiveBet();
+        if (!treasury.canPlaceBet(msg.sender, msg.value))
+            revert InsufficientTreasuryBalance();
 
-        activeGames[msg.sender] = true;
+        // Update player state
         playerHands[msg.sender] = PlayerHand({
             bet: msg.value,
             cards: new uint8[](0),
             resolved: false
         });
+        
+        isPlayerActive[msg.sender] = true;
+        activeGames[msg.sender] = true;
         activePlayers.push(msg.sender);
+        lastActionTime[msg.sender] = block.timestamp;
+
+        // Process bet in treasury
+        treasury.processBetLoss(msg.sender, msg.value);
         
         emit BetPlaced(msg.sender, msg.value);
     }
 
-    function resolveGames(address[] calldata winners, uint8[] calldata multipliers) external onlyOwner nonReentrant notResolving {
-        resolving = true;
-        require(winners.length == multipliers.length, "Arrays length mismatch");
+    function resolveGames(address[] calldata players, uint256[] calldata multipliers) external onlyOwner {
+        require(players.length == multipliers.length, "Arrays must be same length");
         
-        WinningInfo[] memory winnings = new WinningInfo[](winners.length);
-        uint256 winningCount = 0;
-
-        // Calculate all winnings and update state
-        for (uint256 i = 0; i < winners.length; i++) {
-            address player = winners[i];
-            require(playerHands[player].bet > 0, "No active bet for player");
-            require(!playerHands[player].resolved, "Game already resolved");
+        for (uint256 i = 0; i < players.length; i++) {
+            address player = players[i];
+            uint256 multiplier = multipliers[i];
+            uint256 bet = playerHands[player].bet;
             
-            uint256 winningAmount = playerHands[player].bet * multipliers[i];
-            if (winningAmount > 0) {
-                winnings[winningCount] = WinningInfo({
-                    player: player,
-                    amount: winningAmount
-                });
-                winningCount++;
+            if (multiplier > 0) {
+                uint256 winnings = bet * multiplier;
+                treasury.processBetWin(player, winnings);
+                emit GameResolved(player, winnings);
             }
             
-            playerHands[player].resolved = true;
+            // Clear player state
+            delete playerHands[player];
+            activeGames[player] = false;
+            isPlayerActive[player] = false;
+            
+            // Remove from active players array
+            for (uint256 j = 0; j < activePlayers.length; j++) {
+                if (activePlayers[j] == player) {
+                    activePlayers[j] = activePlayers[activePlayers.length - 1];
+                    activePlayers.pop();
+                    break;
+                }
+            }
         }
-        
-        // Clear all active games
-        for (uint256 i = 0; i < activePlayers.length; i++) {
-            delete playerHands[activePlayers[i]];
-            activeGames[activePlayers[i]] = false;
-        }
-        delete activePlayers;
-
-        // Process all payouts through treasury
-        for (uint256 i = 0; i < winningCount; i++) {
-            treasury.processBetWin(winnings[i].player, winnings[i].amount);
-            emit GameResolved(winnings[i].player, winnings[i].amount);
-        }
-        resolving = false;
     }
 
     function getActivePlayers() external view returns (address[] memory) {
