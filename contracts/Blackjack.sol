@@ -31,7 +31,7 @@ contract Blackjack is ReentrancyGuard {
     bool private paused;
     uint256 private maxWithdrawalAmount = 10 ether;
     mapping(address => uint256) private lastActionTime;
-    uint256 private actionCooldown = 1 minutes;
+    uint256 private actionCooldown = 10 seconds;
 
     event BetPlaced(address indexed player, uint256 amount);
     event GameResolved(address indexed player, uint256 winnings);
@@ -131,27 +131,36 @@ contract Blackjack is ReentrancyGuard {
         whenNotPaused 
     {
         require(players.length == multipliers.length, "Arrays must be same length");
+        require(players.length > 0, "No players to resolve");
         
         for (uint256 i = 0; i < players.length; i++) {
             address player = players[i];
             uint256 multiplier = multipliers[i];
             uint256 bet = playerHands[player].bet;
             
+            require(bet > 0, "No active bet for player");
+            require(isPlayerActive[player], "Player not active");
+            
             if (multiplier > 0) {
                 // For wins (multiplier = 2) or pushes (multiplier = 1)
                 uint256 payout = bet * multiplier;
-                treasury.payoutToPlayer(player, payout);
+                
+                // Ensure house has enough funds
+                require(
+                    treasury.getHouseFunds() >= payout, 
+                    "Insufficient house funds for payout"
+                );
+                
+                // Process win through treasury
+                treasury.processBetWin(player, payout);
                 emit GameResolved(player, payout);
+            } else {
+                // For losses (multiplier = 0), funds stay in treasury
+                emit GameResolved(player, 0);
             }
-            // For losses (multiplier = 0), bet stays in treasury
             
             // Clear player state
-            playerHands[player] = PlayerHand({
-                bet: 0,
-                cards: new uint8[](0),
-                resolved: false
-            });
-            
+            delete playerHands[player];
             activeGames[player] = false;
             isPlayerActive[player] = false;
             
