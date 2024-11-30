@@ -132,9 +132,12 @@ contract HouseTreasury is ReentrancyGuard {
     function withdraw(uint256 amount) external nonReentrant hasActiveAccount {
         require(amount > 0, "Must withdraw some ETH");
         require(playerBalances[msg.sender] >= amount, "Insufficient balance");
+        require(address(this).balance >= amount, "Insufficient contract balance");
         
+        // Update balance before transfer to prevent reentrancy
         playerBalances[msg.sender] -= amount;
         
+        // Transfer ETH to player
         (bool success, ) = msg.sender.call{value: amount}("");
         require(success, "Transfer failed");
         
