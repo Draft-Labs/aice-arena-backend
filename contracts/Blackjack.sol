@@ -31,7 +31,7 @@ contract Blackjack is ReentrancyGuard {
     bool private paused;
     uint256 private maxWithdrawalAmount = 10 ether;
     mapping(address => uint256) private lastActionTime;
-    uint256 private actionCooldown = 10 seconds;
+    uint256 private actionCooldown = 15 seconds;
 
     event BetPlaced(address indexed player, uint256 amount);
     event GameResolved(address indexed player, uint256 winnings);
@@ -126,8 +126,7 @@ contract Blackjack is ReentrancyGuard {
     }
 
     function resolveGames(address[] calldata players, uint256[] calldata multipliers) 
-        external 
-        onlyOwner 
+        external
         whenNotPaused 
     {
         require(players.length == multipliers.length, "Arrays must be same length");
@@ -135,6 +134,19 @@ contract Blackjack is ReentrancyGuard {
         
         for (uint256 i = 0; i < players.length; i++) {
             address player = players[i];
+            
+            // Only owner or the player themselves can resolve their bet
+            require(
+                msg.sender == owner || msg.sender == player,
+                "Only owner or player can resolve bet"
+            );
+            
+            // If not owner, can only resolve own bet
+            if (msg.sender != owner) {
+                require(player == msg.sender, "Can only resolve own bet");
+                require(players.length == 1, "Players can only resolve one bet at a time");
+            }
+            
             uint256 multiplier = multipliers[i];
             uint256 bet = playerHands[player].bet;
             
