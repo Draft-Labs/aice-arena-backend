@@ -33,6 +33,9 @@ contract Blackjack is ReentrancyGuard {
     mapping(address => uint256) private lastActionTime;
     uint256 private actionCooldown = 15 seconds;
 
+    mapping(address => bytes32) public playerGameHashes;
+    mapping(bytes32 => bool) public usedHashes;
+
     event BetPlaced(address indexed player, uint256 amount);
     event GameResolved(address indexed player, uint256 winnings);
     event CardDealt(address indexed player, uint8 card);
@@ -206,5 +209,82 @@ contract Blackjack is ReentrancyGuard {
             });
         }
         return hand;
+    }
+
+    function submitGameResult(
+        uint8[] calldata playerCards,
+        uint8[] calldata dealerCards,
+        uint256 multiplier,
+        uint256 nonce
+    ) external {
+        require(isPlayerActive[msg.sender], "No active game");
+        
+        // Create a unique hash of the game state
+        bytes32 gameHash = keccak256(abi.encodePacked(
+            msg.sender,
+            playerCards,
+            dealerCards,
+            multiplier,
+            nonce
+        ));
+        
+        // Store the hash for later verification
+        playerGameHashes[msg.sender] = gameHash;
+    }
+
+    function resolveGameForPlayer(
+        address player,
+        uint8[] calldata playerCards,
+        uint8[] calldata dealerCards,
+        uint256 multiplier,
+        uint256 nonce
+    ) external onlyOwner whenNotPaused {
+        // Recreate and verify the game hash
+        bytes32 gameHash = keccak256(abi.encodePacked(
+            player,
+            playerCards,
+            dealerCards,
+            multiplier,
+            nonce
+        ));
+        
+        require(gameHash == playerGameHashes[player], "Invalid game state");
+        require(!usedHashes[gameHash], "Game already resolved");
+        require(isPlayerActive[player], "Player not active");
+
+        // Mark hash as used
+        usedHashes[gameHash] = true;
+        
+        // Clear the game hash
+        delete playerGameHashes[player];
+
+        // Process the game resolution
+        uint256 bet = playerHands[player].bet;
+        require(bet > 0, "No active bet");
+
+        if (multiplier > 0) {
+            uint256 payout = bet * multiplier;
+            require(
+                treasury.getHouseFunds() >= payout, 
+                "Insufficient house funds for payout"
+            );
+            treasury.processBetWin(player, payout);
+            emit GameResolved(player, payout);
+        } else {
+            emit GameResolved(player, 0);
+        }
+        
+        // Clear player state
+        delete playerHands[player];
+        isPlayerActive[player] = false;
+        
+        // Remove from active players array
+        for (uint256 i = 0; i < activePlayers.length; i++) {
+            if (activePlayers[i] == player) {
+                activePlayers[i] = activePlayers[activePlayers.length - 1];
+                activePlayers.pop();
+                break;
+            }
+        }
     }
 }
