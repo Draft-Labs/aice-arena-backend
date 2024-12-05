@@ -3,6 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const { ethers } = require('ethers');
 const BlackjackJSON = require('../artifacts/contracts/Blackjack.sol/Blackjack.json');
+const RouletteJSON = require('../artifacts/contracts/Roulette.sol/Roulette.json');
+const TreasuryJSON = require('../artifacts/contracts/HouseTreasury.sol/HouseTreasury.json');
 
 const app = express();
 app.use(cors());
@@ -12,6 +14,8 @@ app.use(express.json());
 let provider;
 let houseSigner;
 let blackjackContract;
+let rouletteContract;
+let treasuryContract;
 
 const EXPECTED_CHAIN_ID = 31337; // Hardhat's default chain ID
 
@@ -26,6 +30,16 @@ try {
   blackjackContract = new ethers.Contract(
     process.env.BLACKJACK_ADDRESS,
     BlackjackJSON.abi,
+    houseSigner
+  );
+  rouletteContract = new ethers.Contract(
+    process.env.ROULETTE_ADDRESS,
+    RouletteJSON.abi,
+    houseSigner
+  );
+  treasuryContract = new ethers.Contract(
+    process.env.TREASURY_ADDRESS,
+    TreasuryJSON.abi,
     houseSigner
   );
 
@@ -78,6 +92,16 @@ async function ensureConnection() {
       blackjackContract = new ethers.Contract(
         process.env.BLACKJACK_ADDRESS,
         BlackjackJSON.abi,
+        houseSigner
+      );
+      rouletteContract = new ethers.Contract(
+        process.env.ROULETTE_ADDRESS,
+        RouletteJSON.abi,
+        houseSigner
+      );
+      treasuryContract = new ethers.Contract(
+        process.env.TREASURY_ADDRESS,
+        TreasuryJSON.abi,
         houseSigner
       );
     }
@@ -360,6 +384,100 @@ app.post('/submit-game', async (req, res) => {
         stack: error.stack,
         type: error.code || 'UNKNOWN_ERROR'
       }
+    });
+  }
+});
+
+// Add new endpoints for roulette
+app.post('/submit-roulette-bet', async (req, res) => {
+  try {
+    const { player, betAmount, betType, numbers, nonce } = req.body;
+
+    console.log('Received roulette bet:', {
+      player,
+      betAmount,
+      betType,
+      numbers,
+      nonce
+    });
+
+    // Verify player has an active account in Treasury
+    const hasAccount = await treasuryContract.activeAccounts(player);
+    if (!hasAccount) {
+      throw new Error('No active account found');
+    }
+
+    // Verify player has sufficient balance
+    const playerBalance = await treasuryContract.getPlayerBalance(player);
+    const betAmountWei = ethers.parseEther(betAmount.toString());
+    if (playerBalance < betAmountWei) {
+      throw new Error('Insufficient balance');
+    }
+
+    // Process the bet through the treasury first
+    await treasuryContract.processBetLoss(player, betAmountWei);
+
+    // Then place the bet in the roulette contract
+    const tx = await rouletteContract.placeBet(
+      betType,
+      numbers,
+      betAmountWei,
+      {
+        gasLimit: 500000
+      }
+    );
+    
+    console.log('Transaction sent:', tx.hash);
+    const receipt = await tx.wait();
+    console.log('Transaction confirmed:', receipt);
+
+    res.json({ 
+      success: true, 
+      txHash: tx.hash,
+      balance: ethers.formatEther(await treasuryContract.getPlayerBalance(player))
+    });
+  } catch (error) {
+    console.error('Error in submit-roulette-bet:', error);
+    res.status(500).json({ 
+      error: error.message,
+      details: error.stack
+    });
+  }
+});
+
+app.post('/resolve-roulette-bet', async (req, res) => {
+  try {
+    const { player, spinResult, nonce } = req.body;
+
+    console.log('Resolving roulette bet:', {
+      player,
+      spinResult,
+      nonce
+    });
+
+    // Spin the wheel using house wallet
+    const tx = await rouletteContract.spin(
+      spinResult,
+      {
+        gasLimit: 500000
+      }
+    );
+
+    console.log('Transaction sent:', tx.hash);
+    const receipt = await tx.wait();
+    console.log('Transaction confirmed:', receipt);
+
+    res.json({
+      success: true,
+      txHash: tx.hash,
+      result: spinResult
+    });
+
+  } catch (error) {
+    console.error('Error resolving roulette bet:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });

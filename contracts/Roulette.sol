@@ -92,26 +92,52 @@ contract Roulette is ReentrancyGuard {
         _;
     }
 
-    function placeBet(BetType betType, uint8[] calldata numbers) external nonReentrant whenNotPaused rateLimited {
-        require(treasury.canPlaceBet(msg.sender, minBetAmount), "Insufficient balance or no active account");
-        require(isValidBet(betType, numbers), "Invalid bet configuration.");
-
-        // Process the bet amount from their treasury balance
-        treasury.processBetLoss(msg.sender, minBetAmount);
-
-        // Add player to activePlayers if not already present
-        if (playerBets[msg.sender].length == 0) {
-            activePlayers.push(msg.sender);
+    function placeBet(BetType betType, uint8[] calldata numbers) external payable nonReentrant whenNotPaused {
+        require(msg.value >= minBetAmount, "Bet amount below minimum");
+        
+        // For straight bets with multiple numbers, handle each number as a separate bet
+        if (betType == BetType.Straight && numbers.length > 1) {
+            uint256 individualBetAmount = msg.value / numbers.length;
+            require(individualBetAmount > 0, "Bet amount too small for number of bets");
+            
+            // Add player to activePlayers if not already present
+            if (playerBets[msg.sender].length == 0) {
+                activePlayers.push(msg.sender);
+            }
+            
+            // Place individual straight bets for each number
+            for (uint256 i = 0; i < numbers.length; i++) {
+                uint8[] memory singleNumber = new uint8[](1);
+                singleNumber[0] = numbers[i];
+                require(isValidBet(betType, singleNumber), "Invalid bet number");
+                
+                playerBets[msg.sender].push(Bet({
+                    player: msg.sender,
+                    betType: betType,
+                    amount: individualBetAmount,
+                    numbers: singleNumber
+                }));
+                
+                emit BetPlaced(msg.sender, betType, individualBetAmount, singleNumber);
+            }
+        } else {
+            // For all other bet types, validate and place as a single bet
+            require(isValidBet(betType, numbers), "Invalid bet configuration.");
+            
+            // Add player to activePlayers if not already present
+            if (playerBets[msg.sender].length == 0) {
+                activePlayers.push(msg.sender);
+            }
+            
+            playerBets[msg.sender].push(Bet({
+                player: msg.sender,
+                betType: betType,
+                amount: msg.value,
+                numbers: numbers
+            }));
+            
+            emit BetPlaced(msg.sender, betType, msg.value, numbers);
         }
-
-        playerBets[msg.sender].push(Bet({
-            player: msg.sender,
-            betType: betType,
-            amount: minBetAmount,
-            numbers: numbers
-        }));
-
-        emit BetPlaced(msg.sender, betType, minBetAmount, numbers);
     }
 
     function spin(uint8 result) external onlyOwner nonReentrant notResolving {
@@ -203,13 +229,59 @@ contract Roulette is ReentrancyGuard {
     }
 
     function isValidBet(BetType betType, uint8[] memory numbers) internal pure returns (bool) {
-        if (betType == BetType.Straight) return numbers.length == 1 && numbers[0] <= 36;
-        if (betType == BetType.Split) return numbers.length == 2;
-        if (betType == BetType.Street) return numbers.length == 3;
-        if (betType == BetType.Corner) return numbers.length == 4;
-        if (betType == BetType.Line) return numbers.length == 6;
+        // First check all numbers are valid (0-36)
+        for (uint8 i = 0; i < numbers.length; i++) {
+            if (numbers[i] > 36) return false;
+        }
+
+        // Then check specific bet type requirements
+        if (betType == BetType.Straight) return numbers.length == 1;
+        if (betType == BetType.Split) return numbers.length == 2 && areNumbersAdjacent(numbers);
+        if (betType == BetType.Street) return numbers.length == 3 && isValidStreet(numbers);
+        if (betType == BetType.Corner) return numbers.length == 4 && isValidCorner(numbers);
+        if (betType == BetType.Line) return numbers.length == 6 && isValidLine(numbers);
         if (betType == BetType.Column || betType == BetType.Dozen) return numbers.length == 12;
-        return numbers.length == 0; // For Red/Black, Even/Odd, Low/High
+        
+        // For Red/Black, Even/Odd, Low/High, no specific numbers are needed
+        if (betType >= BetType.Red) return numbers.length == 0;
+        
+        return false;
+    }
+
+    function areNumbersAdjacent(uint8[] memory numbers) internal pure returns (bool) {
+        if (numbers.length != 2) return false;
+        uint8 a = numbers[0];
+        uint8 b = numbers[1];
+        
+        // Check horizontal adjacency (same row)
+        if (((a - 1) / 3) == ((b - 1) / 3)) {
+            return (a + 1 == b) || (b + 1 == a);
+        }
+        
+        // Check vertical adjacency (same column)
+        return (a + 3 == b) || (b + 3 == a);
+    }
+
+    function isValidStreet(uint8[] memory numbers) internal pure returns (bool) {
+        if (numbers.length != 3) return false;
+        
+        // Sort numbers
+        uint8[] memory sorted = new uint8[](3);
+        sorted = numbers;
+        for (uint8 i = 0; i < 2; i++) {
+            for (uint8 j = i + 1; j < 3; j++) {
+                if (sorted[i] > sorted[j]) {
+                    uint8 temp = sorted[i];
+                    sorted[i] = sorted[j];
+                    sorted[j] = temp;
+                }
+            }
+        }
+        
+        // Check if numbers form a valid street (three consecutive numbers in same row)
+        return ((sorted[0] - 1) / 3) == ((sorted[2] - 1) / 3) && 
+               sorted[1] == sorted[0] + 1 && 
+               sorted[2] == sorted[1] + 1;
     }
 
     function isRed(uint8 number) internal view returns (bool) {
@@ -236,5 +308,58 @@ contract Roulette is ReentrancyGuard {
     // Add function to set cooldown (for testing)
     function setActionCooldown(uint256 _cooldown) external onlyOwner {
         actionCooldown = _cooldown;
+    }
+
+    function isValidCorner(uint8[] memory numbers) internal pure returns (bool) {
+        if (numbers.length != 4) return false;
+        
+        // Sort numbers
+        uint8[] memory sorted = new uint8[](4);
+        sorted = numbers;
+        for (uint8 i = 0; i < 3; i++) {
+            for (uint8 j = i + 1; j < 4; j++) {
+                if (sorted[i] > sorted[j]) {
+                    uint8 temp = sorted[i];
+                    sorted[i] = sorted[j];
+                    sorted[j] = temp;
+                }
+            }
+        }
+        
+        // Check if numbers form a valid corner
+        // First two numbers should be adjacent horizontally
+        // Second two numbers should be adjacent horizontally
+        // First and third numbers should be adjacent vertically (3 apart)
+        return ((sorted[1] == sorted[0] + 1) && // First row adjacent
+                (sorted[3] == sorted[2] + 1) && // Second row adjacent
+                (sorted[2] == sorted[0] + 3));   // Vertically adjacent
+    }
+
+    function isValidLine(uint8[] memory numbers) internal pure returns (bool) {
+        if (numbers.length != 6) return false;
+        
+        // Sort numbers
+        uint8[] memory sorted = new uint8[](6);
+        sorted = numbers;
+        for (uint8 i = 0; i < 5; i++) {
+            for (uint8 j = i + 1; j < 6; j++) {
+                if (sorted[i] > sorted[j]) {
+                    uint8 temp = sorted[i];
+                    sorted[i] = sorted[j];
+                    sorted[j] = temp;
+                }
+            }
+        }
+        
+        // Check if numbers form two consecutive streets
+        // First three numbers should be in same row
+        // Second three numbers should be in next row
+        return ((sorted[0] - 1) / 3 == ((sorted[2] - 1) / 3) && // First three in same row
+                (sorted[3] - 1) / 3 == ((sorted[5] - 1) / 3) && // Second three in same row
+                (sorted[3] == sorted[0] + 3) &&                  // Rows are adjacent
+                (sorted[1] == sorted[0] + 1) &&                  // First row consecutive
+                (sorted[2] == sorted[1] + 1) &&                  // First row consecutive
+                (sorted[4] == sorted[3] + 1) &&                  // Second row consecutive
+                (sorted[5] == sorted[4] + 1));                   // Second row consecutive
     }
 }
