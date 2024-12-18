@@ -5,6 +5,7 @@ const { ethers } = require('ethers');
 const BlackjackJSON = require('../artifacts/contracts/Blackjack.sol/Blackjack.json');
 const RouletteJSON = require('../artifacts/contracts/Roulette.sol/Roulette.json');
 const TreasuryJSON = require('../artifacts/contracts/HouseTreasury.sol/HouseTreasury.json');
+const PokerJSON = require('../artifacts/contracts/Poker.sol/Poker.json');
 
 const app = express();
 app.use(cors());
@@ -16,6 +17,7 @@ let houseSigner;
 let blackjackContract;
 let rouletteContract;
 let treasuryContract;
+let pokerContract;
 
 const EXPECTED_CHAIN_ID = 31337; // Hardhat's default chain ID
 
@@ -40,6 +42,11 @@ try {
   treasuryContract = new ethers.Contract(
     process.env.TREASURY_ADDRESS,
     TreasuryJSON.abi,
+    houseSigner
+  );
+  pokerContract = new ethers.Contract(
+    process.env.POKER_ADDRESS,
+    PokerJSON.abi,
     houseSigner
   );
 
@@ -102,6 +109,11 @@ async function ensureConnection() {
       treasuryContract = new ethers.Contract(
         process.env.TREASURY_ADDRESS,
         TreasuryJSON.abi,
+        houseSigner
+      );
+      pokerContract = new ethers.Contract(
+        process.env.POKER_ADDRESS,
+        PokerJSON.abi,
         houseSigner
       );
     }
@@ -475,6 +487,160 @@ app.post('/resolve-roulette-bet', async (req, res) => {
 
   } catch (error) {
     console.error('Error resolving roulette bet:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Add poker routes
+app.get('/poker/tables', async (req, res) => {
+  try {
+    const maxTables = await pokerContract.maxTables();
+    const tables = [];
+
+    for (let i = 0; i < maxTables; i++) {
+      const table = await pokerContract.tables(i);
+      if (table.isActive) {
+        tables.push({
+          id: i,
+          minBuyIn: ethers.formatEther(table.minBuyIn),
+          maxBuyIn: ethers.formatEther(table.maxBuyIn),
+          smallBlind: ethers.formatEther(table.smallBlind),
+          bigBlind: ethers.formatEther(table.bigBlind),
+          playerCount: table.playerCount.toString(),
+          isActive: table.isActive
+        });
+      }
+    }
+
+    res.json({ success: true, tables });
+  } catch (error) {
+    console.error('Error fetching tables:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+app.post('/poker/create-table', async (req, res) => {
+  try {
+    const { minBuyIn, maxBuyIn, smallBlind, bigBlind } = req.body;
+
+    console.log('Creating poker table:', {
+      minBuyIn,
+      maxBuyIn,
+      smallBlind,
+      bigBlind
+    });
+
+    const tx = await pokerContract.createTable(
+      ethers.parseEther(minBuyIn.toString()),
+      ethers.parseEther(maxBuyIn.toString()),
+      ethers.parseEther(smallBlind.toString()),
+      ethers.parseEther(bigBlind.toString()),
+      {
+        gasLimit: 500000
+      }
+    );
+
+    const receipt = await tx.wait();
+    console.log('Table created:', receipt.hash);
+
+    res.json({
+      success: true,
+      txHash: receipt.hash
+    });
+
+  } catch (error) {
+    console.error('Error creating table:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.post('/poker/join-table', async (req, res) => {
+  try {
+    const { player, tableId, buyIn } = req.body;
+
+    console.log('Player joining table:', {
+      player,
+      tableId,
+      buyIn
+    });
+
+    // Verify player has sufficient funds in treasury
+    const playerBalance = await treasuryContract.getPlayerBalance(player);
+    if (playerBalance.lt(ethers.parseEther(buyIn.toString()))) {
+      throw new Error('Insufficient funds in treasury');
+    }
+
+    const tx = await pokerContract.joinTable(
+      tableId,
+      ethers.parseEther(buyIn.toString()),
+      {
+        gasLimit: 500000
+      }
+    );
+
+    const receipt = await tx.wait();
+    console.log('Player joined table:', receipt.hash);
+
+    res.json({
+      success: true,
+      txHash: receipt.hash
+    });
+
+  } catch (error) {
+    console.error('Error joining table:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get('/poker/table/:tableId', async (req, res) => {
+  try {
+    const { tableId } = req.params;
+    const table = await pokerContract.tables(tableId);
+    
+    // Get all players at the table
+    const players = [];
+    const activePlayers = await pokerContract.getTablePlayers(tableId);
+    
+    for (const playerAddress of activePlayers) {
+      const playerInfo = await pokerContract.getPlayerInfo(tableId, playerAddress);
+      players.push({
+        address: playerAddress,
+        tableStake: ethers.formatEther(playerInfo.tableStake),
+        currentBet: ethers.formatEther(playerInfo.currentBet),
+        isActive: playerInfo.isActive,
+        isSittingOut: playerInfo.isSittingOut,
+        position: playerInfo.position
+      });
+    }
+
+    res.json({
+      success: true,
+      table: {
+        minBuyIn: ethers.formatEther(table.minBuyIn),
+        maxBuyIn: ethers.formatEther(table.maxBuyIn),
+        smallBlind: ethers.formatEther(table.smallBlind),
+        bigBlind: ethers.formatEther(table.bigBlind),
+        playerCount: table.playerCount.toString(),
+        isActive: table.isActive,
+        gameState: table.gameState,
+        players
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching table:', error);
     res.status(500).json({
       success: false,
       error: error.message

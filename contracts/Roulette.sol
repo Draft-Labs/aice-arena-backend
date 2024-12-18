@@ -53,6 +53,7 @@ contract Roulette is ReentrancyGuard {
     event ContractPaused();
     event ContractUnpaused();
     event BetResolved(address indexed player, uint256 amount);
+    event GameResult(uint8 result, uint256 payout, bool won);
 
     bool private paused;
     uint256 private maxWithdrawalAmount = 10 ether;
@@ -163,6 +164,9 @@ contract Roulette is ReentrancyGuard {
                         amount: winningAmount
                     });
                     winningCount++;
+                    emit GameResult(result, winningAmount, true);
+                } else {
+                    emit GameResult(result, 0, false);
                 }
             }
             
