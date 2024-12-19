@@ -9,6 +9,7 @@ contract HouseTreasury is ReentrancyGuard {
     mapping(address => bool) public activeAccounts;
     bool private paused;
     uint256 public houseFunds;
+    mapping(address => int256) public playerNetWinnings;
 
     event GameAuthorized(address gameContract);
     event GameDeauthorized(address gameContract);
@@ -20,6 +21,7 @@ contract HouseTreasury is ReentrancyGuard {
     event ContractUnpaused();
     event HouseFunded(uint256 amount);
     event HouseWithdrawn(uint256 amount);
+    event NetWinningsUpdated(address indexed player, int256 netWinnings);
 
     constructor() {
         owner = msg.sender;
@@ -88,7 +90,11 @@ contract HouseTreasury is ReentrancyGuard {
         require(playerBalances[player] >= amount, "Insufficient balance");
         playerBalances[player] -= amount;
         houseFunds += amount;
+        
+        playerNetWinnings[player] -= int256(amount);
+        
         emit BalanceUpdated(player, playerBalances[player]);
+        emit NetWinningsUpdated(player, playerNetWinnings[player]);
     }
 
     // Called by games when a player wins a bet
@@ -97,7 +103,11 @@ contract HouseTreasury is ReentrancyGuard {
         require(houseFunds >= amount, "Insufficient house funds for payout");
         houseFunds -= amount;
         playerBalances[player] += amount;
+        
+        playerNetWinnings[player] += int256(amount);
+        
         emit BalanceUpdated(player, playerBalances[player]);
+        emit NetWinningsUpdated(player, playerNetWinnings[player]);
     }
 
     function getPlayerBalance(address player) external view returns (uint256) {
@@ -179,5 +189,10 @@ contract HouseTreasury is ReentrancyGuard {
         require(success, "Transfer failed");
         
         emit BalanceUpdated(player, amount);
+    }
+
+    // Add function to get player's net winnings
+    function getPlayerNetWinnings(address player) external view returns (int256) {
+        return playerNetWinnings[player];
     }
 }
