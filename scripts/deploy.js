@@ -1,6 +1,13 @@
 const hre = require("hardhat");
 
 async function main() {
+  // Configure the provider to connect to the hosted network
+  const provider = new hre.ethers.JsonRpcProvider("http://0.0.0.0:8545");
+  
+  // Get the deployer's signer
+  const [deployer] = await hre.ethers.getSigners();
+  console.log("Deploying contracts with account:", await deployer.getAddress());
+
   // Deploy Treasury
   const HouseTreasury = await hre.ethers.getContractFactory("HouseTreasury");
   const treasury = await HouseTreasury.deploy();
@@ -108,6 +115,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error);
+  console.error("Deployment failed:", error);
   process.exitCode = 1;
 });
