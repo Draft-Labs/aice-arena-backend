@@ -445,4 +445,10 @@ contract Poker is ReentrancyGuard {
 
         emit TableConfigUpdated(tableId, newMinBet, newMaxBet);
     }
+
+    // Add this function to get all players at a table
+    function getTablePlayers(uint256 tableId) external view returns (address[] memory) {
+        Table storage table = tables[tableId];
+        return table.playerAddresses;
+    }
 }
