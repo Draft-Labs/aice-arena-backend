@@ -62,6 +62,8 @@ contract Poker is Ownable, ReentrancyGuard {
         address[] playerAddresses;
         uint8[] communityCards;
         mapping(address => uint8[]) playerCards;
+        mapping(uint8 => bool) hasActed;
+        bool roundComplete;
     }
 
     // Mappings for game state
@@ -258,23 +260,18 @@ contract Poker is Ownable, ReentrancyGuard {
         
         Player storage player = table.players[msg.sender];
         require(player.isActive, "Player not active");
+        require(table.currentPosition == player.position, "Not your turn");
         
         player.isActive = false;
+        table.hasActed[player.position] = true;
+        
+        // Move to next player
+        moveToNextPlayer(tableId);
+        
         emit PlayerFolded(tableId, msg.sender);
         
         // Check if only one player remains
-        uint256 activePlayers = 0;
-        address winner;
-        for (uint256 i = 0; i < table.playerCount; i++) {
-            if (table.players[table.playerAddresses[i]].isActive) {
-                activePlayers++;
-                winner = table.playerAddresses[i];
-            }
-        }
-        
-        if (activePlayers == 1) {
-            _awardPot(tableId, winner);
-        }
+        checkWinner(tableId);
     }
 
     // Internal helper functions
@@ -498,11 +495,21 @@ contract Poker is Ownable, ReentrancyGuard {
         
         Player storage player = table.players[msg.sender];
         require(player.isActive, "Player not active");
+        require(table.currentPosition == player.position, "Not your turn");
         
         uint256 callAmount = table.currentBet - player.currentBet;
-        require(callAmount > 0, "Nothing to call");
+        require(callAmount <= player.tableStake, "Insufficient funds");
         
-        _placeBet(tableId, msg.sender, callAmount);
+        // Update bets
+        player.tableStake -= callAmount;
+        player.currentBet = table.currentBet;
+        table.pot += callAmount;
+        table.hasActed[player.position] = true;
+        
+        // Move to next player
+        moveToNextPlayer(tableId);
+        
+        emit BetPlaced(tableId, msg.sender, callAmount);
     }
 
     function startFlop(uint256 tableId) external onlyOwner {
@@ -679,5 +686,67 @@ contract Poker is Ownable, ReentrancyGuard {
         table.pot = 0;
         
         emit HandComplete(tableId, winner, potAmount);
+    }
+
+    function isBettingRoundComplete(uint256 tableId) internal view returns (bool) {
+        Table storage table = tables[tableId];
+        uint8 activeCount = 0;
+        uint256 targetBet = table.currentBet;
+        
+        for (uint i = 0; i < table.playerAddresses.length; i++) {
+            address playerAddr = table.playerAddresses[i];
+            Player storage player = table.players[playerAddr];
+            
+            if (player.isActive) {
+                activeCount++;
+                if (!table.hasActed[player.position] || player.currentBet != targetBet) {
+                    return false;
+                }
+            }
+        }
+        
+        return activeCount >= 2;
+    }
+
+    function raise(uint256 tableId, uint256 amount) external {
+        Table storage table = tables[tableId];
+        require(table.gameState != GameState.Waiting, "Game not started");
+        
+        Player storage player = table.players[msg.sender];
+        require(player.isActive, "Player not active");
+        require(table.currentPosition == player.position, "Not your turn");
+        require(amount >= table.currentBet * 2, "Raise must be at least double current bet");
+        require(amount <= player.tableStake, "Insufficient funds");
+        
+        // Update bets
+        player.tableStake -= amount;
+        player.currentBet = amount;
+        table.currentBet = amount;
+        table.pot += amount;
+        table.hasActed[player.position] = true;
+        
+        // Move to next player
+        moveToNextPlayer(tableId);
+        
+        emit BetPlaced(tableId, msg.sender, amount);
+    }
+
+    function checkWinner(uint256 tableId) internal {
+        Table storage table = tables[tableId];
+        uint8 activeCount = 0;
+        address winner;
+        
+        for (uint i = 0; i < table.playerAddresses.length; i++) {
+            address playerAddr = table.playerAddresses[i];
+            if (table.players[playerAddr].isActive) {
+                activeCount++;
+                winner = playerAddr;
+            }
+        }
+        
+        if (activeCount == 1) {
+            _awardPot(tableId, winner);
+            table.gameState = GameState.Complete;
+        }
     }
 }
