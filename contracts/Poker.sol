@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT 
 pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "./HouseTreasury.sol";
 
-contract Poker is ReentrancyGuard {
-    address public owner;
+contract Poker is Ownable, ReentrancyGuard {
     uint256 public minBetAmount;
     HouseTreasury public treasury;
     uint256 public maxTables = 10;
@@ -97,15 +97,9 @@ contract Poker is ReentrancyGuard {
     error InvalidBetLimits();
     error OnlyOwnerAllowed();
 
-    constructor(uint256 _minBetAmount, address payable _treasuryAddress) {
-        owner = msg.sender;
+    constructor(uint256 _minBetAmount, address payable _treasuryAddress) Ownable(msg.sender) {
         minBetAmount = _minBetAmount;
         treasury = HouseTreasury(_treasuryAddress);
-    }
-
-    modifier onlyOwner() {
-        if (msg.sender != owner) revert OnlyOwnerAllowed();
-        _;
     }
 
     modifier onlyValidTable(uint256 tableId) {
@@ -361,13 +355,24 @@ contract Poker is ReentrancyGuard {
         
         if (table.gameState == GameState.PreFlop) {
             table.gameState = GameState.Flop;
-            // Deal flop
+            // Deal flop cards
+            uint8[] memory flopCards = new uint8[](3);
+            flopCards[0] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "flop1"))) % 52 + 1);
+            flopCards[1] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "flop2"))) % 52 + 1);
+            flopCards[2] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "flop3"))) % 52 + 1);
+            dealCommunityCards(tableId, flopCards);
         } else if (table.gameState == GameState.Flop) {
             table.gameState = GameState.Turn;
-            // Deal turn
+            // Deal turn card
+            uint8[] memory turnCard = new uint8[](1);
+            turnCard[0] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "turn"))) % 52 + 1);
+            dealCommunityCards(tableId, turnCard);
         } else if (table.gameState == GameState.Turn) {
             table.gameState = GameState.River;
-            // Deal river
+            // Deal river card
+            uint8[] memory riverCard = new uint8[](1);
+            riverCard[0] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "river"))) % 52 + 1);
+            dealCommunityCards(tableId, riverCard);
         } else if (table.gameState == GameState.River) {
             table.gameState = GameState.Showdown;
             determineWinner(tableId);
@@ -495,20 +500,23 @@ contract Poker is ReentrancyGuard {
         emit BetPlaced(tableId, msg.sender, callAmount);
     }
 
-    function startFlop(uint256 tableId) 
-        external 
-        onlyOwner 
-        onlyValidTable(tableId) 
-    {
+    function startFlop(uint256 tableId) external onlyOwner {
         Table storage table = tables[tableId];
-        require(table.gameState == GameState.PreFlop, "Invalid game state");
+        require(table.gameState == GameState.PreFlop, "Not in PreFlop state");
         
-        // Reset bets before dealing flop
-        resetBets(tableId);
+        // Deal flop cards
+        uint8[] memory flopCards = new uint8[](3);
+        flopCards[0] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "flop1"))) % 52 + 1);
+        flopCards[1] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "flop2"))) % 52 + 1);
+        flopCards[2] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "flop3"))) % 52 + 1);
+        
+        // Store cards directly
+        table.communityCards = flopCards;
+        
+        // Change game state
         table.gameState = GameState.Flop;
         
-        // Set first player position
-        table.currentPosition = (table.dealerPosition + 1) % uint8(table.playerCount);
+        emit CommunityCardsDealt(tableId, flopCards);
     }
 
     function startTurn(uint256 tableId) 
@@ -577,21 +585,11 @@ contract Poker is ReentrancyGuard {
         emit CardsDealt(tableId, player, cards);
     }
 
-    function dealCommunityCards(uint256 tableId, uint8[] calldata cards) 
-        external 
-        onlyOwner 
+    function dealCommunityCards(uint256 tableId, uint8[] memory cards) 
+        internal 
         onlyValidTable(tableId) 
     {
         Table storage table = tables[tableId];
-        
-        // Validate based on game state
-        if (table.gameState == GameState.Flop) {
-            require(cards.length == 3, "Flop requires 3 cards");
-        } else if (table.gameState == GameState.Turn || table.gameState == GameState.River) {
-            require(cards.length == 1, "Turn/River requires 1 card");
-        } else {
-            revert("Invalid game state for dealing community cards");
-        }
         
         // Store the cards
         for (uint i = 0; i < cards.length; i++) {
@@ -602,17 +600,16 @@ contract Poker is ReentrancyGuard {
     }
 
     function getPlayerCards(uint256 tableId, address player) 
-        external 
+        public 
         view 
         returns (uint8[] memory) 
     {
-        Table storage table = tables[tableId];
-        require(msg.sender == player || msg.sender == owner, "Not authorized");
-        return table.playerCards[player];
+        require(msg.sender == player || msg.sender == owner(), "Not authorized");
+        return tables[tableId].playerCards[player];
     }
 
     function getCommunityCards(uint256 tableId) 
-        external 
+        public 
         view 
         returns (uint8[] memory) 
     {
