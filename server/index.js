@@ -8,7 +8,12 @@ const TreasuryJSON = require('../artifacts/contracts/HouseTreasury.sol/HouseTrea
 const PokerJSON = require('../artifacts/contracts/Poker.sol/Poker.json');
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://localhost:5173'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 app.use(express.json());
 
 // Initialize ethers provider and signer
@@ -648,10 +653,305 @@ app.get('/poker/table/:tableId', async (req, res) => {
   }
 });
 
+// Add these new poker game action endpoints
+app.post('/poker/action', async (req, res) => {
+  try {
+    const { tableId, player, action, amount = '0' } = req.body;
+    
+    console.log('Player action:', {
+      tableId,
+      player,
+      action,
+      amount
+    });
+
+    let tx;
+    switch (action) {
+      case 'fold':
+        tx = await pokerContract.fold(tableId);
+        break;
+      case 'check':
+        tx = await pokerContract.check(tableId);
+        break;
+      case 'call':
+        tx = await pokerContract.call(tableId);
+        break;
+      case 'raise':
+        tx = await pokerContract.raise(tableId, ethers.parseEther(amount));
+        break;
+      default:
+        throw new Error('Invalid action');
+    }
+
+    const receipt = await tx.wait();
+    console.log('Action processed:', receipt.hash);
+
+    // Get updated table state
+    const tableInfo = await pokerContract.getTableInfo(tableId);
+    const playerInfo = await pokerContract.getPlayerInfo(tableId, player);
+
+    res.json({
+      success: true,
+      txHash: receipt.hash,
+      tableState: {
+        gameState: tableInfo.gameState,
+        pot: ethers.formatEther(tableInfo.pot),
+        currentBet: ethers.formatEther(playerInfo.currentBet),
+        isPlayerTurn: playerInfo.isActive && !playerInfo.isSittingOut
+      }
+    });
+
+  } catch (error) {
+    console.error('Error processing player action:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.post('/poker/dealer-action', async (req, res) => {
+  try {
+    const { tableId, action } = req.body;
+    
+    console.log('Dealer action:', {
+      tableId,
+      action
+    });
+
+    let tx;
+    let cardsTx;
+    
+    // First change game state
+    switch (action) {
+      case 'startFlop':
+        tx = await pokerContract.startFlop(tableId);
+        // Deal 3 flop cards after state change
+        await tx.wait();
+        cardsTx = await pokerContract.dealCommunityCards(
+          tableId, 
+          [
+            Math.floor(Math.random() * 52) + 1,
+            Math.floor(Math.random() * 52) + 1,
+            Math.floor(Math.random() * 52) + 1
+          ]
+        );
+        break;
+      case 'startTurn':
+        tx = await pokerContract.startTurn(tableId);
+        // Deal 1 turn card after state change
+        await tx.wait();
+        cardsTx = await pokerContract.dealCommunityCards(
+          tableId, 
+          [Math.floor(Math.random() * 52) + 1]
+        );
+        break;
+      case 'startRiver':
+        tx = await pokerContract.startRiver(tableId);
+        // Deal 1 river card after state change
+        await tx.wait();
+        cardsTx = await pokerContract.dealCommunityCards(
+          tableId, 
+          [Math.floor(Math.random() * 52) + 1]
+        );
+        break;
+      case 'startShowdown':
+        tx = await pokerContract.startShowdown(tableId);
+        break;
+      default:
+        throw new Error('Invalid dealer action');
+    }
+
+    await tx.wait();
+    if (cardsTx) await cardsTx.wait();
+
+    // Get updated table state
+    const tableInfo = await pokerContract.getTableInfo(tableId);
+    const communityCards = await pokerContract.getCommunityCards(tableId);
+
+    res.json({
+      success: true,
+      txHash: tx.hash,
+      gameState: tableInfo.gameState,
+      communityCards: communityCards.map(card => Number(card))
+    });
+
+  } catch (error) {
+    console.error('Error processing dealer action:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Add a new endpoint to deal initial player cards
+app.post('/poker/deal-initial-cards', async (req, res) => {
+  try {
+    const { tableId } = req.body;
+    
+    // Get all players at the table
+    const players = await pokerContract.getTablePlayers(tableId);
+    
+    // Deal 2 cards to each active player
+    for (const player of players) {
+      const playerInfo = await pokerContract.getPlayerInfo(tableId, player);
+      if (playerInfo.isActive) {
+        await pokerContract.dealPlayerCards(
+          tableId,
+          player,
+          [
+            Math.floor(Math.random() * 52) + 1,
+            Math.floor(Math.random() * 52) + 1
+          ]
+        );
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Initial cards dealt to all players'
+    });
+
+  } catch (error) {
+    console.error('Error dealing initial cards:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'healthy' });
 });
+
+// Add these new endpoints for dealing cards
+
+app.post('/poker/deal-player-cards', async (req, res) => {
+  try {
+    const { tableId, player } = req.body;
+    
+    // Generate random cards (1-52)
+    const cards = [
+      Math.floor(Math.random() * 52) + 1,
+      Math.floor(Math.random() * 52) + 1
+    ];
+    
+    console.log('Dealing player cards:', {
+      tableId,
+      player,
+      cards
+    });
+
+    const tx = await pokerContract.dealPlayerCards(tableId, player, cards);
+    const receipt = await tx.wait();
+
+    res.json({
+      success: true,
+      txHash: receipt.hash,
+      cards
+    });
+
+  } catch (error) {
+    console.error('Error dealing player cards:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.post('/poker/deal-community-cards', async (req, res) => {
+  try {
+    const { tableId, stage } = req.body;
+    
+    // Generate random cards based on stage
+    let cards;
+    if (stage === 'flop') {
+      cards = Array(3).fill().map(() => Math.floor(Math.random() * 52) + 1);
+    } else if (stage === 'turn' || stage === 'river') {
+      cards = [Math.floor(Math.random() * 52) + 1];
+    } else {
+      throw new Error('Invalid stage');
+    }
+    
+    console.log('Dealing community cards:', {
+      tableId,
+      stage,
+      cards
+    });
+
+    const tx = await pokerContract.dealCommunityCards(tableId, cards);
+    const receipt = await tx.wait();
+
+    res.json({
+      success: true,
+      txHash: receipt.hash,
+      cards
+    });
+
+  } catch (error) {
+    console.error('Error dealing community cards:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Add endpoints to get cards
+app.get('/poker/player-cards/:tableId/:player', async (req, res) => {
+  try {
+    const { tableId, player } = req.params;
+    const cards = await pokerContract.getPlayerCards(tableId, player);
+    
+    res.json({
+      success: true,
+      cards: cards.map(card => Number(card))
+    });
+  } catch (error) {
+    console.error('Error getting player cards:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get('/poker/community-cards/:tableId', async (req, res) => {
+  try {
+    const { tableId } = req.params;
+    const cards = await pokerContract.getCommunityCards(tableId);
+    
+    res.json({
+      success: true,
+      cards: cards.map(card => Number(card))
+    });
+  } catch (error) {
+    console.error('Error getting community cards:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Add helper function to convert card numbers to readable format
+function getCardDetails(cardNumber) {
+  const suits = ['♠', '♣', '♥', '♦'];
+  const values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+  
+  const suitIndex = Math.floor((cardNumber - 1) / 13);
+  const valueIndex = (cardNumber - 1) % 13;
+  
+  return {
+    suit: suits[suitIndex],
+    value: values[valueIndex],
+    color: suitIndex >= 2 ? 'red' : 'black'
+  };
+}
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {

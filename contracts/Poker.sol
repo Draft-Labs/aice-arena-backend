@@ -76,12 +76,14 @@ contract Poker is ReentrancyGuard {
     event BetPlaced(uint256 indexed tableId, address indexed player, uint256 amount);
     event PlayerFolded(uint256 indexed tableId, address indexed player);
     event HandComplete(uint256 indexed tableId, address indexed winner, uint256 pot);
-    event CommunityCardsDealt(uint256 indexed tableId, uint8[] cards);
     event TableConfigUpdated(
         uint256 indexed tableId,
         uint256 minBet,
         uint256 maxBet
     );
+    event PlayerCardsDealt(uint256 indexed tableId, address indexed player, uint8[] cards);
+    event CommunityCardsDealt(uint256 indexed tableId, uint8[] cards);
+    event CardsDealt(uint256 indexed tableId, address indexed player, uint8[] cards);
 
     // Error messages
     error TableFull();
@@ -273,28 +275,33 @@ contract Poker is ReentrancyGuard {
     // Internal helper functions
     function startNewHand(uint256 tableId) internal {
         Table storage table = tables[tableId];
-        require(table.playerCount >= 2, "Not enough players");
         
+        // Clear community cards
+        delete table.communityCards;
+        
+        // Clear player cards
+        for (uint i = 0; i < table.playerAddresses.length; i++) {
+            address player = table.playerAddresses[i];
+            delete table.playerCards[player];
+        }
+        
+        // Reset game state
         table.gameState = GameState.Dealing;
         table.pot = 0;
         
-        // Move dealer button
-        table.dealerPosition = (table.dealerPosition + 1) % uint8(table.playerCount);
-        
-        // Reset player states
+        // Deal new cards to active players
         for (uint i = 0; i < table.playerAddresses.length; i++) {
-            address playerAddr = table.playerAddresses[i];
-            if (table.players[playerAddr].tableStake > 0) {
-                table.players[playerAddr].isActive = true;
-                table.players[playerAddr].currentBet = 0;
+            address player = table.playerAddresses[i];
+            if (table.players[player].isActive) {
+                uint8[] memory cards = new uint8[](2);
+                cards[0] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, player, "card1"))) % 52 + 1);
+                cards[1] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, player, "card2"))) % 52 + 1);
+                dealPlayerCards(tableId, player, cards);
             }
         }
         
-        // Post blinds
-        postBlinds(tableId);
-        
+        // Move to PreFlop state
         table.gameState = GameState.PreFlop;
-        emit GameStarted(tableId);
     }
 
     function postBlinds(uint256 tableId) internal {
@@ -450,5 +457,165 @@ contract Poker is ReentrancyGuard {
     function getTablePlayers(uint256 tableId) external view returns (address[] memory) {
         Table storage table = tables[tableId];
         return table.playerAddresses;
+    }
+
+    function check(uint256 tableId) 
+        external 
+        onlyValidTable(tableId) 
+        onlyTablePlayer(tableId) 
+    {
+        Table storage table = tables[tableId];
+        Player storage player = table.players[msg.sender];
+        
+        require(table.currentPosition == player.position, "Not your turn");
+        require(player.currentBet == table.minBet, "Cannot check");
+        
+        moveToNextPlayer(tableId);
+    }
+
+    function call(uint256 tableId) 
+        external 
+        onlyValidTable(tableId) 
+        onlyTablePlayer(tableId) 
+    {
+        Table storage table = tables[tableId];
+        Player storage player = table.players[msg.sender];
+        
+        require(table.currentPosition == player.position, "Not your turn");
+        
+        uint256 callAmount = table.minBet - player.currentBet;
+        require(player.tableStake >= callAmount, "Insufficient stake");
+        
+        player.tableStake -= callAmount;
+        player.currentBet += callAmount;
+        table.pot += callAmount;
+        
+        moveToNextPlayer(tableId);
+        
+        emit BetPlaced(tableId, msg.sender, callAmount);
+    }
+
+    function startFlop(uint256 tableId) 
+        external 
+        onlyOwner 
+        onlyValidTable(tableId) 
+    {
+        Table storage table = tables[tableId];
+        require(table.gameState == GameState.PreFlop, "Invalid game state");
+        
+        // Reset bets before dealing flop
+        resetBets(tableId);
+        table.gameState = GameState.Flop;
+        
+        // Set first player position
+        table.currentPosition = (table.dealerPosition + 1) % uint8(table.playerCount);
+    }
+
+    function startTurn(uint256 tableId) 
+        external 
+        onlyOwner 
+        onlyValidTable(tableId) 
+    {
+        Table storage table = tables[tableId];
+        require(table.gameState == GameState.Flop, "Invalid game state");
+        
+        resetBets(tableId);
+        table.gameState = GameState.Turn;
+        table.currentPosition = (table.dealerPosition + 1) % uint8(table.playerCount);
+    }
+
+    function startRiver(uint256 tableId) 
+        external 
+        onlyOwner 
+        onlyValidTable(tableId) 
+    {
+        Table storage table = tables[tableId];
+        require(table.gameState == GameState.Turn, "Invalid game state");
+        
+        resetBets(tableId);
+        table.gameState = GameState.River;
+        table.currentPosition = (table.dealerPosition + 1) % uint8(table.playerCount);
+    }
+
+    function startShowdown(uint256 tableId) 
+        external 
+        onlyOwner 
+        onlyValidTable(tableId) 
+    {
+        Table storage table = tables[tableId];
+        require(table.gameState == GameState.River, "Invalid game state");
+        
+        table.gameState = GameState.Showdown;
+        determineWinner(tableId);
+    }
+
+    // Helper function to reset bets between rounds
+    function resetBets(uint256 tableId) internal {
+        Table storage table = tables[tableId];
+        
+        for (uint i = 0; i < table.playerAddresses.length; i++) {
+            address playerAddr = table.playerAddresses[i];
+            if (table.players[playerAddr].isActive) {
+                table.players[playerAddr].currentBet = 0;
+            }
+        }
+    }
+
+    function dealPlayerCards(uint256 tableId, address player, uint8[] memory cards) 
+        internal 
+        onlyValidTable(tableId) 
+    {
+        require(cards.length == 2, "Must deal exactly 2 cards");
+        Table storage table = tables[tableId];
+        require(table.players[player].isActive, "Player not active");
+        
+        delete table.playerCards[player];
+        for (uint i = 0; i < cards.length; i++) {
+            table.playerCards[player].push(cards[i]);
+        }
+        
+        emit CardsDealt(tableId, player, cards);
+    }
+
+    function dealCommunityCards(uint256 tableId, uint8[] calldata cards) 
+        external 
+        onlyOwner 
+        onlyValidTable(tableId) 
+    {
+        Table storage table = tables[tableId];
+        
+        // Validate based on game state
+        if (table.gameState == GameState.Flop) {
+            require(cards.length == 3, "Flop requires 3 cards");
+        } else if (table.gameState == GameState.Turn || table.gameState == GameState.River) {
+            require(cards.length == 1, "Turn/River requires 1 card");
+        } else {
+            revert("Invalid game state for dealing community cards");
+        }
+        
+        // Store the cards
+        for (uint i = 0; i < cards.length; i++) {
+            table.communityCards.push(cards[i]);
+        }
+        
+        emit CommunityCardsDealt(tableId, cards);
+    }
+
+    function getPlayerCards(uint256 tableId, address player) 
+        external 
+        view 
+        returns (uint8[] memory) 
+    {
+        Table storage table = tables[tableId];
+        require(msg.sender == player || msg.sender == owner, "Not authorized");
+        return table.playerCards[player];
+    }
+
+    function getCommunityCards(uint256 tableId) 
+        external 
+        view 
+        returns (uint8[] memory) 
+    {
+        return tables[tableId].communityCards;
     }
 }
