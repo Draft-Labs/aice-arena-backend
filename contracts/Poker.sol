@@ -519,30 +519,36 @@ contract Poker is Ownable, ReentrancyGuard {
         emit CommunityCardsDealt(tableId, flopCards);
     }
 
-    function startTurn(uint256 tableId) 
-        external 
-        onlyOwner 
-        onlyValidTable(tableId) 
-    {
+    function startTurn(uint256 tableId) external onlyOwner {
         Table storage table = tables[tableId];
-        require(table.gameState == GameState.Flop, "Invalid game state");
+        require(table.gameState == GameState.Flop, "Not in Flop state");
         
-        resetBets(tableId);
+        // Deal turn card
+        uint8 turnCard = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "turn"))) % 52 + 1);
+        
+        // Add turn card to community cards
+        table.communityCards.push(turnCard);
+        
+        // Change game state
         table.gameState = GameState.Turn;
-        table.currentPosition = (table.dealerPosition + 1) % uint8(table.playerCount);
+        
+        emit CommunityCardsDealt(tableId, table.communityCards);
     }
 
-    function startRiver(uint256 tableId) 
-        external 
-        onlyOwner 
-        onlyValidTable(tableId) 
-    {
+    function startRiver(uint256 tableId) external onlyOwner {
         Table storage table = tables[tableId];
-        require(table.gameState == GameState.Turn, "Invalid game state");
+        require(table.gameState == GameState.Turn, "Not in Turn state");
         
-        resetBets(tableId);
+        // Deal river card
+        uint8 riverCard = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "river"))) % 52 + 1);
+        
+        // Add river card to community cards
+        table.communityCards.push(riverCard);
+        
+        // Change game state
         table.gameState = GameState.River;
-        table.currentPosition = (table.dealerPosition + 1) % uint8(table.playerCount);
+        
+        emit CommunityCardsDealt(tableId, table.communityCards);
     }
 
     function startShowdown(uint256 tableId) 
