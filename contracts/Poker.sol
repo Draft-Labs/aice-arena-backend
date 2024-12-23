@@ -52,6 +52,7 @@ contract Poker is Ownable, ReentrancyGuard {
         uint256 minBet;
         uint256 maxBet;
         uint256 pot;
+        uint256 currentBet;
         uint8 dealerPosition;
         uint8 currentPosition;
         uint8 playerCount;
@@ -84,6 +85,7 @@ contract Poker is Ownable, ReentrancyGuard {
     event PlayerCardsDealt(uint256 indexed tableId, address indexed player, uint8[] cards);
     event CommunityCardsDealt(uint256 indexed tableId, uint8[] cards);
     event CardsDealt(uint256 indexed tableId, address indexed player, uint8[] cards);
+    event BlindsPosted(uint256 indexed tableId, address smallBlind, address bigBlind, uint256 smallBlindAmount, uint256 bigBlindAmount);
 
     // Error messages
     error TableFull();
@@ -250,20 +252,29 @@ contract Poker is Ownable, ReentrancyGuard {
     }
 
     // Fold
-    function fold(uint256 tableId) 
-        external 
-        onlyValidTable(tableId) 
-        onlyTablePlayer(tableId) 
-    {
+    function fold(uint256 tableId) external {
         Table storage table = tables[tableId];
-        Player storage player = table.players[msg.sender];
+        require(table.gameState != GameState.Waiting, "Game not started");
         
-        require(table.currentPosition == player.position, "Not your turn");
+        Player storage player = table.players[msg.sender];
+        require(player.isActive, "Player not active");
         
         player.isActive = false;
-        moveToNextPlayer(tableId);
-        
         emit PlayerFolded(tableId, msg.sender);
+        
+        // Check if only one player remains
+        uint256 activePlayers = 0;
+        address winner;
+        for (uint256 i = 0; i < table.playerCount; i++) {
+            if (table.players[table.playerAddresses[i]].isActive) {
+                activePlayers++;
+                winner = table.playerAddresses[i];
+            }
+        }
+        
+        if (activePlayers == 1) {
+            _awardPot(tableId, winner);
+        }
     }
 
     // Internal helper functions
@@ -298,33 +309,36 @@ contract Poker is Ownable, ReentrancyGuard {
         table.gameState = GameState.PreFlop;
     }
 
-    function postBlinds(uint256 tableId) internal {
+    function postBlinds(uint256 tableId) external onlyOwner {
         Table storage table = tables[tableId];
+        require(table.gameState == GameState.PreFlop, "Not in PreFlop state");
         
-        // Small blind position
-        uint8 sbPos = (table.dealerPosition + 1) % uint8(table.playerCount);
-        address sbPlayer = table.playerAddresses[sbPos];
+        // Get players directly from storage
+        address[] storage tablePlayers = table.playerAddresses;
+        require(tablePlayers.length >= 2, "Need at least 2 players");
         
-        // Big blind position
-        uint8 bbPos = (table.dealerPosition + 2) % uint8(table.playerCount);
-        address bbPlayer = table.playerAddresses[bbPos];
+        // Post small blind (Player 0)
+        address smallBlindPlayer = tablePlayers[0];
+        uint256 smallBlindAmount = table.smallBlind;
+        Player storage smallBlindPlayerInfo = table.players[smallBlindPlayer];
+        require(smallBlindPlayerInfo.tableStake >= smallBlindAmount, "Small blind cannot cover bet");
+        smallBlindPlayerInfo.tableStake -= smallBlindAmount;
+        smallBlindPlayerInfo.currentBet = smallBlindAmount;
+        table.pot += smallBlindAmount;
         
-        // Post small blind
-        if (table.players[sbPlayer].tableStake >= table.smallBlind) {
-            table.players[sbPlayer].tableStake -= table.smallBlind;
-            table.players[sbPlayer].currentBet = table.smallBlind;
-            table.pot += table.smallBlind;
-        }
+        // Post big blind (Player 1)
+        address bigBlindPlayer = tablePlayers[1];
+        uint256 bigBlindAmount = table.bigBlind;
+        Player storage bigBlindPlayerInfo = table.players[bigBlindPlayer];
+        require(bigBlindPlayerInfo.tableStake >= bigBlindAmount, "Big blind cannot cover bet");
+        bigBlindPlayerInfo.tableStake -= bigBlindAmount;
+        bigBlindPlayerInfo.currentBet = bigBlindAmount;
+        table.pot += bigBlindAmount;
         
-        // Post big blind
-        if (table.players[bbPlayer].tableStake >= table.bigBlind) {
-            table.players[bbPlayer].tableStake -= table.bigBlind;
-            table.players[bbPlayer].currentBet = table.bigBlind;
-            table.pot += table.bigBlind;
-        }
+        // Update current bet to big blind amount
+        table.currentBet = bigBlindAmount;
         
-        // Action starts with UTG (Under the Gun)
-        table.currentPosition = (bbPos + 1) % uint8(table.playerCount);
+        emit BlindsPosted(tableId, smallBlindPlayer, bigBlindPlayer, smallBlindAmount, bigBlindAmount);
     }
 
     function moveToNextPlayer(uint256 tableId) internal {
@@ -478,31 +492,47 @@ contract Poker is Ownable, ReentrancyGuard {
         moveToNextPlayer(tableId);
     }
 
-    function call(uint256 tableId) 
-        external 
-        onlyValidTable(tableId) 
-        onlyTablePlayer(tableId) 
-    {
+    function call(uint256 tableId) external {
         Table storage table = tables[tableId];
+        require(table.gameState != GameState.Waiting, "Game not started");
+        
         Player storage player = table.players[msg.sender];
+        require(player.isActive, "Player not active");
         
-        require(table.currentPosition == player.position, "Not your turn");
+        uint256 callAmount = table.currentBet - player.currentBet;
+        require(callAmount > 0, "Nothing to call");
         
-        uint256 callAmount = table.minBet - player.currentBet;
-        require(player.tableStake >= callAmount, "Insufficient stake");
-        
-        player.tableStake -= callAmount;
-        player.currentBet += callAmount;
-        table.pot += callAmount;
-        
-        moveToNextPlayer(tableId);
-        
-        emit BetPlaced(tableId, msg.sender, callAmount);
+        _placeBet(tableId, msg.sender, callAmount);
     }
 
     function startFlop(uint256 tableId) external onlyOwner {
         Table storage table = tables[tableId];
         require(table.gameState == GameState.PreFlop, "Not in PreFlop state");
+        
+        // Post blinds first
+        address[] storage tablePlayers = table.playerAddresses;
+        require(tablePlayers.length >= 2, "Need at least 2 players");
+        
+        // Post small blind (Player 0)
+        address smallBlindPlayer = tablePlayers[0];
+        uint256 smallBlindAmount = table.smallBlind;
+        Player storage smallBlindPlayerInfo = table.players[smallBlindPlayer];
+        require(smallBlindPlayerInfo.tableStake >= smallBlindAmount, "Small blind cannot cover bet");
+        smallBlindPlayerInfo.tableStake -= smallBlindAmount;
+        smallBlindPlayerInfo.currentBet = smallBlindAmount;
+        table.pot += smallBlindAmount;
+        
+        // Post big blind (Player 1)
+        address bigBlindPlayer = tablePlayers[1];
+        uint256 bigBlindAmount = table.bigBlind;
+        Player storage bigBlindPlayerInfo = table.players[bigBlindPlayer];
+        require(bigBlindPlayerInfo.tableStake >= bigBlindAmount, "Big blind cannot cover bet");
+        bigBlindPlayerInfo.tableStake -= bigBlindAmount;
+        bigBlindPlayerInfo.currentBet = bigBlindAmount;
+        table.pot += bigBlindAmount;
+        
+        // Update current bet to big blind amount
+        table.currentBet = bigBlindAmount;
         
         // Deal flop cards
         uint8[] memory flopCards = new uint8[](3);
@@ -516,6 +546,7 @@ contract Poker is Ownable, ReentrancyGuard {
         // Change game state
         table.gameState = GameState.Flop;
         
+        emit BlindsPosted(tableId, smallBlindPlayer, bigBlindPlayer, smallBlindAmount, bigBlindAmount);
         emit CommunityCardsDealt(tableId, flopCards);
     }
 
@@ -620,5 +651,33 @@ contract Poker is Ownable, ReentrancyGuard {
         returns (uint8[] memory) 
     {
         return tables[tableId].communityCards;
+    }
+
+    // Internal helper function
+    function _placeBet(uint256 tableId, address player, uint256 amount) internal {
+        Table storage table = tables[tableId];
+        Player storage playerInfo = table.players[player];
+        
+        require(playerInfo.tableStake >= amount, "Insufficient balance");
+        
+        playerInfo.tableStake -= amount;
+        playerInfo.currentBet = amount;
+        table.pot += amount;
+        
+        emit BetPlaced(tableId, player, amount);
+    }
+
+    function _awardPot(uint256 tableId, address winner) internal {
+        Table storage table = tables[tableId];
+        Player storage player = table.players[winner];
+        
+        // Add pot to winner's table stake
+        player.tableStake += table.pot;
+        
+        // Reset pot
+        uint256 potAmount = table.pot;
+        table.pot = 0;
+        
+        emit HandComplete(tableId, winner, potAmount);
     }
 }
