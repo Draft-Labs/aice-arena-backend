@@ -436,9 +436,11 @@ contract Poker is Ownable, ReentrancyGuard {
         // Award pot to winner
         if (winner != address(0)) {
             uint256 potAmount = table.pot;
-            _awardPot(tableId, winner);
+            table.pot = 0;
+            table.players[winner].tableStake += potAmount;
             
-            // Emit event with winner details
+            // Emit events
+            emit HandComplete(tableId, winner, potAmount);
             emit HandWinner(tableId, winner, highestRank, potAmount);
         }
         
@@ -862,11 +864,27 @@ contract Poker is Ownable, ReentrancyGuard {
         uint256 potAmount = table.pot;
         table.pot = 0;
         
+        // Get winner's hand rank
+        uint8[] memory playerCards = table.playerCards[winner];
+        uint8[] memory allCards = new uint8[](7);
+        
+        // Combine player cards and community cards
+        allCards[0] = playerCards[0];
+        allCards[1] = playerCards[1];
+        for(uint j = 0; j < table.communityCards.length; j++) {
+            allCards[j + 2] = table.communityCards[j];
+        }
+        
+        // Evaluate hand
+        (HandRank winningRank, ) = evaluateHand(allCards);
+        
         // Log after award
         console.log("Pot awarded, emitting event");
         
+        // Only emit HandComplete for game state tracking
         emit HandComplete(tableId, winner, potAmount);
-        emit HandWinner(tableId, winner, HandRank.HighCard, potAmount);
+        // Emit HandWinner with the actual hand rank
+        emit HandWinner(tableId, winner, winningRank, potAmount);
         
         console.log("Events emitted");
     }
