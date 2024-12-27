@@ -438,6 +438,9 @@ contract Poker is Ownable, ReentrancyGuard {
 
     function advanceGameState(uint256 tableId) internal {
         Table storage table = tables[tableId];
+
+        //Require that all players have acted
+        require(checkRoundComplete(tableId), "Not all players have acted");
         
         if (table.gameState == GameState.PreFlop) {
             table.gameState = GameState.Flop;
@@ -767,6 +770,7 @@ contract Poker is Ownable, ReentrancyGuard {
     function startFlop(uint256 tableId) external onlyOwner {
         Table storage table = tables[tableId];
         require(table.gameState == GameState.PreFlop, "Not in PreFlop state");
+        require(checkRoundComplete(tableId), "Not all players have acted");
         
         // Post blinds first
         address[] storage tablePlayers = table.playerAddresses;
@@ -812,7 +816,8 @@ contract Poker is Ownable, ReentrancyGuard {
     function startTurn(uint256 tableId) external onlyOwner {
         Table storage table = tables[tableId];
         require(table.gameState == GameState.Flop, "Not in Flop state");
-        
+        require(checkRoundComplete(tableId), "Not all players have acted");
+
         // Deal turn card
         uint8 turnCard = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "turn"))) % 52 + 1);
         
@@ -828,7 +833,8 @@ contract Poker is Ownable, ReentrancyGuard {
     function startRiver(uint256 tableId) external onlyOwner {
         Table storage table = tables[tableId];
         require(table.gameState == GameState.Turn, "Not in Turn state");
-        
+        require(checkRoundComplete(tableId), "Not all players have acted");
+
         // Deal river card
         uint8 riverCard = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "river"))) % 52 + 1);
         
@@ -848,6 +854,7 @@ contract Poker is Ownable, ReentrancyGuard {
     {
         Table storage table = tables[tableId];
         require(table.gameState == GameState.River, "Invalid game state");
+        require(checkRoundComplete(tableId), "Not all players have acted");
         
         table.gameState = GameState.Showdown;
         determineWinner(tableId);
