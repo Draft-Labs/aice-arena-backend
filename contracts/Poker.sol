@@ -41,7 +41,7 @@ contract Poker is Ownable, ReentrancyGuard {
         uint256 currentBet;     // Current bet in the round
         bool isActive;          // Still in the current hand
         bool isSittingOut;      // Temporarily sitting out
-        uint8 position;         // Position at table (0-5)
+        uint256 position;       // Position at table (0-5)
     }
 
     struct Table {
@@ -54,16 +54,16 @@ contract Poker is Ownable, ReentrancyGuard {
         uint256 maxBet;
         uint256 pot;
         uint256 currentBet;
-        uint8 dealerPosition;
-        uint8 currentPosition;
-        uint8 playerCount;
+        uint256 dealerPosition;
+        uint256 currentPosition;
+        uint256 playerCount;
         GameState gameState;
         bool isActive;
         mapping(address => Player) players;
         address[] playerAddresses;
         uint8[] communityCards;
         mapping(address => uint8[]) playerCards;
-        mapping(uint8 => bool) hasActed;
+        mapping(uint256 => bool) hasActed;
         bool roundComplete;
     }
 
@@ -90,6 +90,9 @@ contract Poker is Ownable, ReentrancyGuard {
     event CardsDealt(uint256 indexed tableId, address indexed player, uint8[] cards);
     event BlindsPosted(uint256 indexed tableId, address smallBlind, address bigBlind, uint256 smallBlindAmount, uint256 bigBlindAmount);
     event HandWinner(uint256 indexed tableId, address indexed winner, HandRank winningHandRank, uint256 potAmount);
+    event TurnStarted(uint256 indexed tableId, address indexed player);
+    event TurnEnded(uint256 indexed tableId, address indexed player, string action);
+    event RoundComplete(uint256 indexed tableId);
 
     // Error messages
     error TableFull();
@@ -183,7 +186,7 @@ contract Poker is Ownable, ReentrancyGuard {
             currentBet: 0,
             isActive: true,
             isSittingOut: false,
-            position: uint8(table.playerCount)
+            position: uint256(table.playerCount)
         });
         
         table.playerAddresses.push(msg.sender);
@@ -256,42 +259,86 @@ contract Poker is Ownable, ReentrancyGuard {
     }
 
     // Fold
-    function fold(uint256 tableId) external {
+    function fold(uint256 tableId) 
+        external 
+        onlyValidTable(tableId) 
+        onlyTablePlayer(tableId) 
+    {
+        // Log initial state
+        console.log("=== Starting fold operation ===");
+        console.log("Table ID:", tableId);
+        console.log("Sender:", msg.sender);
+        
         Table storage table = tables[tableId];
-        require(table.gameState != GameState.Waiting, "Game not started");
+        console.log("Table loaded. Player count:", table.playerCount);
+        console.log("Current position:", table.currentPosition);
         
         Player storage player = table.players[msg.sender];
-        require(player.isActive, "Player not active");
-        require(table.currentPosition == player.position, "Not your turn");
+        console.log("Player loaded. Position:", player.position);
+        console.log("Player active status:", player.isActive);
         
+        // Basic checks
+        console.log("Performing checks...");
+        require(table.currentPosition == player.position, "Not your turn");
+        require(player.isActive, "Player not active");
+        require(player.position < table.playerAddresses.length, "Invalid player position");
+        require(table.playerCount > 0, "No players at table");
+        console.log("Basic checks passed");
+        
+        // Count active players before fold
+        uint256 activeBefore = 0;
+        console.log("Counting active players...");
+        console.log("Player addresses length:", table.playerAddresses.length);
+        
+        for (uint256 i = 0; i < table.playerAddresses.length; i++) {
+            address playerAddr = table.playerAddresses[i];
+            console.log("Checking player", i, ":", playerAddr);
+            if (table.players[playerAddr].isActive) {
+                activeBefore++;
+                console.log("Player", i, "is active");
+            }
+        }
+        
+        console.log("Active players count:", activeBefore);
+        require(activeBefore > 1, "Not enough active players");
+        
+        // Perform fold
+        console.log("Performing fold...");
         player.isActive = false;
         table.hasActed[player.position] = true;
-        
-        // Move to next player
-        moveToNextPlayer(tableId);
+        console.log("Player marked as inactive");
         
         emit PlayerFolded(tableId, msg.sender);
+        emit TurnEnded(tableId, msg.sender, "fold");
         
-        // Check if only one player remains
-        checkWinner(tableId);
+        // Find next player
+        console.log("Finding next player...");
+        moveToNextPlayer(tableId);
+        console.log("=== Fold operation complete ===");
     }
 
     // Internal helper functions
     function startNewHand(uint256 tableId) internal {
         Table storage table = tables[tableId];
         
-        // Clear community cards
-        delete table.communityCards;
+        // Reset game state
+        table.gameState = GameState.Dealing;
+        table.pot = 0;
+        table.currentBet = 0;
+        table.currentPosition = 0;
+        table.roundComplete = false;
         
-        // Clear player cards
+        // Reset hasActed mapping
+        for (uint256 i = 0; i < table.playerCount; i++) {
+            table.hasActed[i] = false;
+        }
+        
+        // Clear existing cards
+        delete table.communityCards;
         for (uint i = 0; i < table.playerAddresses.length; i++) {
             address player = table.playerAddresses[i];
             delete table.playerCards[player];
         }
-        
-        // Reset game state
-        table.gameState = GameState.Dealing;
-        table.pot = 0;
         
         // Deal new cards to active players
         for (uint i = 0; i < table.playerAddresses.length; i++) {
@@ -304,8 +351,9 @@ contract Poker is Ownable, ReentrancyGuard {
             }
         }
         
-        // Move to PreFlop state
+        // Move to PreFlop state and start with first player
         table.gameState = GameState.PreFlop;
+        emit TurnStarted(tableId, table.playerAddresses[0]);
     }
 
     function postBlinds(uint256 tableId) external onlyOwner {
@@ -341,26 +389,46 @@ contract Poker is Ownable, ReentrancyGuard {
     }
 
     function moveToNextPlayer(uint256 tableId) internal {
+        console.log("=== Starting moveToNextPlayer ===");
         Table storage table = tables[tableId];
-        uint8 nextPosition;
-        bool foundNext = false;
+        console.log("Current position:", table.currentPosition);
+        console.log("Player count:", table.playerCount);
+        console.log("Player addresses length:", table.playerAddresses.length);
         
-        // Loop through positions until we find next active player
-        for (uint8 i = 1; i <= table.playerCount; i++) {
-            nextPosition = (table.currentPosition + i) % uint8(table.playerCount);
-            address nextPlayer = table.playerAddresses[nextPosition];
+        require(table.playerCount > 0, "No players at table");
+        require(table.playerAddresses.length > 0, "No player addresses");
+        require(table.currentPosition < table.playerAddresses.length, "Invalid current position");
+        
+        bool foundNext = false;
+        uint256 startingPosition = table.currentPosition;
+        
+        console.log("Starting position:", startingPosition);
+        
+        // Try to find next active player
+        for (uint256 i = 1; i <= table.playerAddresses.length; i++) {
+            uint256 nextPosition = (startingPosition + i) % table.playerAddresses.length;
+            console.log("Checking position:", nextPosition);
             
-            if (table.players[nextPlayer].isActive) {
+            address nextPlayer = table.playerAddresses[nextPosition];
+            console.log("Next player address:", nextPlayer);
+            
+            if (nextPlayer != address(0) && table.players[nextPlayer].isActive) {
                 table.currentPosition = nextPosition;
                 foundNext = true;
+                console.log("Found next player at position:", nextPosition);
+                emit TurnStarted(tableId, nextPlayer);
                 break;
             }
         }
         
-        // If no active players found, move to next game state
-        if (!foundNext) {
+        console.log("Found next:", foundNext);
+        console.log("Round complete:", checkRoundComplete(tableId));
+        
+        if (!foundNext || checkRoundComplete(tableId)) {
+            console.log("Advancing game state");
             advanceGameState(tableId);
         }
+        console.log("=== moveToNextPlayer complete ===");
     }
 
     function advanceGameState(uint256 tableId) internal {
@@ -588,7 +656,7 @@ contract Poker is Ownable, ReentrancyGuard {
         uint256 minBet,
         uint256 maxBet,
         uint256 pot,
-        uint8 playerCount,
+        uint256 playerCount,
         GameState gameState,
         bool isActive
     ) {
@@ -612,7 +680,7 @@ contract Poker is Ownable, ReentrancyGuard {
         uint256 currentBet,
         bool isActive,
         bool isSittingOut,
-        uint8 position
+        uint256 position
     ) {
         Player storage p = tables[tableId].players[player];
         return (
@@ -659,32 +727,36 @@ contract Poker is Ownable, ReentrancyGuard {
         Player storage player = table.players[msg.sender];
         
         require(table.currentPosition == player.position, "Not your turn");
-        require(player.currentBet == table.minBet, "Cannot check");
+        require(player.currentBet == table.currentBet, "Cannot check");
         
+        table.hasActed[player.position] = true;
+        
+        emit TurnEnded(tableId, msg.sender, "check");
         moveToNextPlayer(tableId);
     }
 
-    function call(uint256 tableId) external {
+    function call(uint256 tableId) 
+        external 
+        onlyValidTable(tableId) 
+        onlyTablePlayer(tableId) 
+    {
         Table storage table = tables[tableId];
-        require(table.gameState != GameState.Waiting, "Game not started");
-        
         Player storage player = table.players[msg.sender];
-        require(player.isActive, "Player not active");
+        
         require(table.currentPosition == player.position, "Not your turn");
         
         uint256 callAmount = table.currentBet - player.currentBet;
         require(callAmount <= player.tableStake, "Insufficient funds");
         
-        // Update bets
         player.tableStake -= callAmount;
         player.currentBet = table.currentBet;
         table.pot += callAmount;
         table.hasActed[player.position] = true;
         
-        // Move to next player
-        moveToNextPlayer(tableId);
-        
         emit BetPlaced(tableId, msg.sender, callAmount);
+        emit TurnEnded(tableId, msg.sender, "call");
+        
+        moveToNextPlayer(tableId);
     }
 
     function startFlop(uint256 tableId) external onlyOwner {
@@ -889,9 +961,9 @@ contract Poker is Ownable, ReentrancyGuard {
         console.log("Events emitted");
     }
 
-    function isBettingRoundComplete(uint256 tableId) internal view returns (bool) {
+    function checkRoundComplete(uint256 tableId) internal view returns (bool) {
         Table storage table = tables[tableId];
-        uint8 activeCount = 0;
+        uint256 activeCount = 0;
         uint256 targetBet = table.currentBet;
         
         for (uint i = 0; i < table.playerAddresses.length; i++) {
@@ -900,7 +972,7 @@ contract Poker is Ownable, ReentrancyGuard {
             
             if (player.isActive) {
                 activeCount++;
-                if (!table.hasActed[player.position] || player.currentBet != targetBet) {
+                if (!table.hasActed[i] || player.currentBet != targetBet) {
                     return false;
                 }
             }
@@ -909,45 +981,35 @@ contract Poker is Ownable, ReentrancyGuard {
         return activeCount >= 2;
     }
 
-    function raise(uint256 tableId, uint256 amount) external {
+    function raise(uint256 tableId, uint256 amount) 
+        external 
+        onlyValidTable(tableId) 
+        onlyTablePlayer(tableId) 
+    {
         Table storage table = tables[tableId];
-        require(table.gameState != GameState.Waiting, "Game not started");
-        
         Player storage player = table.players[msg.sender];
-        require(player.isActive, "Player not active");
-        require(table.currentPosition == player.position, "Not your turn");
-        require(amount >= table.currentBet * 2, "Raise must be at least double current bet");
-        require(amount <= player.tableStake, "Insufficient funds");
         
-        // Update bets
+        require(table.currentPosition == player.position, "Not your turn");
+        require(amount > table.currentBet * 2, "Raise must be at least double current bet");
+        require(amount <= player.tableStake, "Insufficient funds");
+        require(amount >= table.minBet && amount <= table.maxBet, "Invalid bet amount");
+        
         player.tableStake -= amount;
         player.currentBet = amount;
         table.currentBet = amount;
         table.pot += amount;
         table.hasActed[player.position] = true;
         
-        // Move to next player
-        moveToNextPlayer(tableId);
-        
-        emit BetPlaced(tableId, msg.sender, amount);
-    }
-
-    function checkWinner(uint256 tableId) internal {
-        Table storage table = tables[tableId];
-        uint8 activeCount = 0;
-        address winner;
-        
-        for (uint i = 0; i < table.playerAddresses.length; i++) {
-            address playerAddr = table.playerAddresses[i];
-            if (table.players[playerAddr].isActive) {
-                activeCount++;
-                winner = playerAddr;
+        // Reset hasActed for all other players since they need to respond to raise
+        for (uint256 i = 0; i < table.playerCount; i++) {
+            if (i != player.position) {
+                table.hasActed[i] = false;
             }
         }
         
-        if (activeCount == 1) {
-            _awardPot(tableId, winner);
-            table.gameState = GameState.Complete;
-        }
+        emit BetPlaced(tableId, msg.sender, amount);
+        emit TurnEnded(tableId, msg.sender, "raise");
+        
+        moveToNextPlayer(tableId);
     }
 }
