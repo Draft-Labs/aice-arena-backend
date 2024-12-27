@@ -339,6 +339,11 @@ contract Poker is Ownable, ReentrancyGuard {
             address player = table.playerAddresses[i];
             delete table.playerCards[player];
         }
+
+        // Reactivate all players
+        for (uint i = 0; i < table.playerAddresses.length; i++) {
+            table.players[table.playerAddresses[i]].isActive = true;
+        }
         
         // Deal new cards to active players
         for (uint i = 0; i < table.playerAddresses.length; i++) {
