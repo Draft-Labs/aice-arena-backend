@@ -356,8 +356,35 @@ contract Poker is Ownable, ReentrancyGuard {
             }
         }
         
-        // Move to PreFlop state and start with first player
+        // Move to PreFlop state
         table.gameState = GameState.PreFlop;
+
+        // Post blinds first
+        address[] storage tablePlayers = table.playerAddresses;
+        require(tablePlayers.length >= 2, "Need at least 2 players");
+
+        // Post small blind (Player 0)
+        address smallBlindPlayer = tablePlayers[0];
+        uint256 smallBlindAmount = table.smallBlind;
+        Player storage smallBlindPlayerInfo = table.players[smallBlindPlayer];
+        require(smallBlindPlayerInfo.tableStake >= smallBlindAmount, "Small blind cannot cover bet");
+        smallBlindPlayerInfo.tableStake -= smallBlindAmount;
+        smallBlindPlayerInfo.currentBet = smallBlindAmount;
+        table.pot += smallBlindAmount;
+        
+        // Post big blind (Player 1)
+        address bigBlindPlayer = tablePlayers[1];
+        uint256 bigBlindAmount = table.bigBlind;
+        Player storage bigBlindPlayerInfo = table.players[bigBlindPlayer];
+        require(bigBlindPlayerInfo.tableStake >= bigBlindAmount, "Big blind cannot cover bet");
+        bigBlindPlayerInfo.tableStake -= bigBlindAmount;
+        bigBlindPlayerInfo.currentBet = bigBlindAmount;
+        table.pot += bigBlindAmount;
+        
+        // Update current bet to big blind amount
+        table.currentBet = bigBlindAmount;
+
+        //Start the turn for player 0
         emit TurnStarted(tableId, table.playerAddresses[0]);
     }
 
@@ -439,8 +466,11 @@ contract Poker is Ownable, ReentrancyGuard {
     function advanceGameState(uint256 tableId) internal {
         Table storage table = tables[tableId];
 
-        //Require that all players have acted
+        // Require that all players have acted
         require(checkRoundComplete(tableId), "Not all players have acted");
+        
+        // Reset all hasActed flags and current bets for the new round
+        resetRound(tableId);
         
         if (table.gameState == GameState.PreFlop) {
             table.gameState = GameState.Flop;
@@ -772,30 +802,6 @@ contract Poker is Ownable, ReentrancyGuard {
         require(table.gameState == GameState.PreFlop, "Not in PreFlop state");
         require(checkRoundComplete(tableId), "Not all players have acted");
         
-        // Post blinds first
-        address[] storage tablePlayers = table.playerAddresses;
-        require(tablePlayers.length >= 2, "Need at least 2 players");
-        
-        // Post small blind (Player 0)
-        address smallBlindPlayer = tablePlayers[0];
-        uint256 smallBlindAmount = table.smallBlind;
-        Player storage smallBlindPlayerInfo = table.players[smallBlindPlayer];
-        require(smallBlindPlayerInfo.tableStake >= smallBlindAmount, "Small blind cannot cover bet");
-        smallBlindPlayerInfo.tableStake -= smallBlindAmount;
-        smallBlindPlayerInfo.currentBet = smallBlindAmount;
-        table.pot += smallBlindAmount;
-        
-        // Post big blind (Player 1)
-        address bigBlindPlayer = tablePlayers[1];
-        uint256 bigBlindAmount = table.bigBlind;
-        Player storage bigBlindPlayerInfo = table.players[bigBlindPlayer];
-        require(bigBlindPlayerInfo.tableStake >= bigBlindAmount, "Big blind cannot cover bet");
-        bigBlindPlayerInfo.tableStake -= bigBlindAmount;
-        bigBlindPlayerInfo.currentBet = bigBlindAmount;
-        table.pot += bigBlindAmount;
-        
-        // Update current bet to big blind amount
-        table.currentBet = bigBlindAmount;
         
         // Deal flop cards
         uint8[] memory flopCards = new uint8[](3);
@@ -809,7 +815,6 @@ contract Poker is Ownable, ReentrancyGuard {
         // Change game state
         table.gameState = GameState.Flop;
         
-        emit BlindsPosted(tableId, smallBlindPlayer, bigBlindPlayer, smallBlindAmount, bigBlindAmount);
         emit CommunityCardsDealt(tableId, flopCards);
     }
 
@@ -855,7 +860,7 @@ contract Poker is Ownable, ReentrancyGuard {
         Table storage table = tables[tableId];
         require(table.gameState == GameState.River, "Invalid game state");
         require(checkRoundComplete(tableId), "Not all players have acted");
-        
+
         table.gameState = GameState.Showdown;
         determineWinner(tableId);
     }
@@ -1023,5 +1028,35 @@ contract Poker is Ownable, ReentrancyGuard {
         emit TurnEnded(tableId, msg.sender, "raise");
         
         moveToNextPlayer(tableId);
+    }
+
+    // Add this new helper function
+    function resetRound(uint256 tableId) internal {
+        Table storage table = tables[tableId];
+        
+        // Reset hasActed flags
+        for (uint256 i = 0; i < table.playerCount; i++) {
+            table.hasActed[i] = false;
+        }
+        
+        // Reset current bets
+        for (uint i = 0; i < table.playerAddresses.length; i++) {
+            address playerAddr = table.playerAddresses[i];
+            if (table.players[playerAddr].isActive) {
+                table.players[playerAddr].currentBet = 0;
+            }
+        }
+        
+        // Reset table current bet
+        table.currentBet = 0;
+        
+        // Reset current position to first active player
+        for (uint256 i = 0; i < table.playerAddresses.length; i++) {
+            address playerAddr = table.playerAddresses[i];
+            if (table.players[playerAddr].isActive) {
+                table.currentPosition = i;
+                break;
+            }
+        }
     }
 }
