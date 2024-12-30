@@ -1039,16 +1039,19 @@ contract Poker is Ownable, ReentrancyGuard {
             table.hasActed[i] = false;
         }
         
-        // Reset current bets
-        for (uint i = 0; i < table.playerAddresses.length; i++) {
-            address playerAddr = table.playerAddresses[i];
-            if (table.players[playerAddr].isActive) {
-                table.players[playerAddr].currentBet = 0;
+        // Only reset current bets if the hand is complete
+        if (table.gameState == GameState.Complete || table.gameState == GameState.Waiting) {
+            // Reset current bets
+            for (uint i = 0; i < table.playerAddresses.length; i++) {
+                address playerAddr = table.playerAddresses[i];
+                if (table.players[playerAddr].isActive) {
+                    table.players[playerAddr].currentBet = 0;
+                }
             }
+            
+            // Reset table current bet
+            table.currentBet = 0;
         }
-        
-        // Reset table current bet
-        table.currentBet = 0;
         
         // Reset current position to first active player
         for (uint256 i = 0; i < table.playerAddresses.length; i++) {
