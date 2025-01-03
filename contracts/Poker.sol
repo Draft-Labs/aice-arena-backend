@@ -206,31 +206,89 @@ contract Poker is Ownable, ReentrancyGuard {
         external 
         nonReentrant 
         onlyValidTable(tableId) 
-        onlyTablePlayer(tableId) 
     {
         Table storage table = tables[tableId];
+        
+        // Check if player is actually at the table
+        require(playerTables[msg.sender] == tableId, "Player not at this table");
+        
         Player storage player = table.players[msg.sender];
+        require(player.playerAddress == msg.sender, "Player not found");
         
-        require(player.tableStake > 0, "No stake to withdraw");
+        // Allow leaving if player has either stake or active bet
+        require(player.tableStake > 0 || player.currentBet > 0, "No stake or bet to withdraw");
         
-        // Return stake to treasury
-        treasury.processBetWin(msg.sender, player.tableStake);
+        // Only return tableStake to treasury, currentBet stays in pot if in active hand
+        if (player.tableStake > 0) {
+            try treasury.processBetWin(msg.sender, player.tableStake) {
+                // Success
+            } catch {
+                revert("Treasury transfer failed");
+            }
+        }
         
         uint256 remainingStake = player.tableStake;
         player.tableStake = 0;
         player.isActive = false;
-        table.playerCount--;
         
-        // Remove from playerAddresses
+        // Safely decrease player count
+        if (table.playerCount > 0) {
+            table.playerCount--;
+        }
+        
+        // Remove from playerAddresses safely
+        bool found = false;
         for (uint i = 0; i < table.playerAddresses.length; i++) {
             if (table.playerAddresses[i] == msg.sender) {
-                table.playerAddresses[i] = table.playerAddresses[table.playerAddresses.length - 1];
+                // Move last element to this position if it's not the last element
+                if (i < table.playerAddresses.length - 1) {
+                    table.playerAddresses[i] = table.playerAddresses[table.playerAddresses.length - 1];
+                }
                 table.playerAddresses.pop();
+                found = true;
                 break;
             }
         }
+        require(found, "Player not found in addresses array");
         
         delete playerTables[msg.sender];
+
+        // If this was the last active player, award pot to remaining player
+        if (table.gameState != GameState.Waiting && table.gameState != GameState.Complete) {
+            uint256 activeCount = 0;
+            address lastActivePlayer;
+            
+            for (uint i = 0; i < table.playerAddresses.length; i++) {
+                if (table.players[table.playerAddresses[i]].isActive) {
+                    activeCount++;
+                    lastActivePlayer = table.playerAddresses[i];
+                }
+            }
+            
+            // If only one player remains, they win the pot
+            if (activeCount == 1) {
+                Player storage winner = table.players[lastActivePlayer];
+                winner.tableStake += table.pot;
+                
+                // Get winner's hand rank for the event
+                uint8[] memory playerCards = table.playerCards[lastActivePlayer];
+                uint8[] memory allCards = new uint8[](7);
+                allCards[0] = playerCards[0];
+                allCards[1] = playerCards[1];
+                for(uint j = 0; j < table.communityCards.length; j++) {
+                    allCards[j + 2] = table.communityCards[j];
+                }
+                
+                (HandRank winningRank, ) = evaluateHand(allCards);
+                
+                emit HandComplete(tableId, lastActivePlayer, table.pot);
+                emit HandWinner(tableId, lastActivePlayer, winningRank, table.pot);
+                
+                table.pot = 0;
+                table.gameState = GameState.Complete;
+            }
+        }
+        
         emit PlayerLeft(tableId, msg.sender, remainingStake);
     }
 
