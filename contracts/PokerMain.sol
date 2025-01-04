@@ -28,12 +28,12 @@ contract PokerMain is PokerGameplay {
         uint256 bigBlind,
         uint256 minBet,
         uint256 maxBet
-    ) external override onlyOwner returns (uint256) {
+    ) public override onlyOwner returns (uint256) {
         return super.createTable(minBuyIn, maxBuyIn, smallBlind, bigBlind, minBet, maxBet);
     }
 
     // Join table
-    function joinTable(uint256 tableId, uint256 buyInAmount) external override nonReentrant {
+    function joinTable(uint256 tableId, uint256 buyInAmount) public override nonReentrant {
         require(
             treasury.getPlayerBalance(msg.sender) >= buyInAmount,
             "Insufficient balance in treasury"
@@ -43,7 +43,7 @@ contract PokerMain is PokerGameplay {
         HouseTreasury(treasuryAddress).processBetLoss(msg.sender, buyInAmount);
         
         // Join table through inherited function
-        super.joinTable(tableId, msg.sender, buyInAmount);
+        super.joinTable(tableId, buyInAmount);
         playerTables[msg.sender] = tableId;
 
         // Start game if enough players
@@ -53,7 +53,7 @@ contract PokerMain is PokerGameplay {
     }
 
     // Leave table
-    function leaveTable(uint256 tableId) external override nonReentrant {
+    function leaveTable(uint256 tableId) public override nonReentrant {
         require(playerTables[msg.sender] == tableId, "Player not at this table");
         
         uint256 remainingStake = super.getPlayerTableStake(tableId, msg.sender);
@@ -61,29 +61,29 @@ contract PokerMain is PokerGameplay {
             HouseTreasury(treasuryAddress).processBetWin(msg.sender, remainingStake);
         }
         
-        super.leaveTable(tableId, msg.sender);
+        super.leaveTable(tableId);
         delete playerTables[msg.sender];
     }
 
     // Game actions
-    function placeBet(uint256 tableId, uint256 betAmount) external override {
+    function placeBet(uint256 tableId, uint256 betAmount) public override {
         super.placeBet(tableId, betAmount);
     }
 
-    function fold(uint256 tableId) external override {
+    function fold(uint256 tableId) public override {
         super.fold(tableId);
     }
 
-    function check(uint256 tableId) external override {
+    function check(uint256 tableId) public override {
         super.check(tableId);
     }
 
-    function call(uint256 tableId) external override {
+    function call(uint256 tableId) public override {
         super.call(tableId);
     }
 
     // View functions
-    function getTableInfo(uint256 tableId) external view override returns (
+    function getTableInfo(uint256 tableId) public view override returns (
         uint256 minBuyIn,
         uint256 maxBuyIn,
         uint256 smallBlind,
@@ -98,7 +98,7 @@ contract PokerMain is PokerGameplay {
         return super.getTableInfo(tableId);
     }
 
-    function getPlayerInfo(uint256 tableId, address player) external view override returns (
+    function getPlayerInfo(uint256 tableId, address player) public view override returns (
         uint256 tableStake,
         uint256 currentBet,
         bool isActive,
@@ -108,7 +108,7 @@ contract PokerMain is PokerGameplay {
         return super.getPlayerInfo(tableId, player);
     }
 
-    function getTablePlayers(uint256 tableId) external view override returns (address[] memory) {
+    function getTablePlayers(uint256 tableId) public view override returns (address[] memory) {
         return super.getTablePlayers(tableId);
     }
 }

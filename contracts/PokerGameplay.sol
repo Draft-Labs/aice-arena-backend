@@ -24,7 +24,7 @@ contract PokerGameplay is PokerTable {
         uint256 bigBlind,
         uint256 minBet,
         uint256 maxBet
-    ) virtual external override onlyOwner returns (uint256) {
+    ) public virtual override onlyOwner returns (uint256) {
         return super.createTable(minBuyIn, maxBuyIn, smallBlind, bigBlind, minBet, maxBet);
     }
 
@@ -57,7 +57,7 @@ contract PokerGameplay is PokerTable {
     }
 
     function fold(uint256 tableId) 
-        virtual external 
+        virtual public 
         onlyValidTable(tableId) 
         onlyTablePlayer(tableId) 
     {
@@ -75,7 +75,7 @@ contract PokerGameplay is PokerTable {
     }
 
     function placeBet(uint256 tableId, uint256 betAmount) 
-        virtual external 
+        virtual public 
         onlyValidTable(tableId) 
         onlyTablePlayer(tableId) 
     {
@@ -222,7 +222,7 @@ contract PokerGameplay is PokerTable {
     }
 
     function check(uint256 tableId) 
-        virtual external 
+        virtual public 
         onlyValidTable(tableId) 
         onlyTablePlayer(tableId) 
     {
@@ -236,7 +236,7 @@ contract PokerGameplay is PokerTable {
     }
 
     function call(uint256 tableId) 
-        virtual external 
+        virtual public 
         onlyValidTable(tableId) 
         onlyTablePlayer(tableId) 
     {

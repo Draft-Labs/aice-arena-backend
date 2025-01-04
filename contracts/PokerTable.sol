@@ -77,7 +77,7 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
         uint256 bigBlind,
         uint256 minBet,
         uint256 maxBet
-    ) virtual external onlyOwner returns (uint256) {
+    ) public virtual onlyOwner returns (uint256) {
         // Validate inputs
         if (minBuyIn >= maxBuyIn) revert InvalidBuyIn();
         if (minBet >= maxBet) revert InvalidBetLimits();
@@ -104,7 +104,7 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
 
     // Join a table
     function joinTable(uint256 tableId, uint256 buyInAmount) 
-        virtual external 
+        virtual public 
         nonReentrant 
         onlyValidTable(tableId) 
     {
@@ -141,7 +141,7 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
 
     // Leave table
     function leaveTable(uint256 tableId) 
-        virtual external 
+        virtual public 
         nonReentrant 
         onlyValidTable(tableId) 
     {
@@ -195,7 +195,7 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
     }
 
     // View functions
-    function getTableInfo(uint256 tableId) virtual external view returns (
+    function getTableInfo(uint256 tableId) virtual public view returns (
         uint256 minBuyIn,
         uint256 maxBuyIn,
         uint256 smallBlind,
@@ -222,7 +222,7 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
         );
     }
 
-    function getPlayerInfo(uint256 tableId, address player) virtual external view returns (
+    function getPlayerInfo(uint256 tableId, address player) virtual public view returns (
         uint256 tableStake,
         uint256 currentBet,
         bool isActive,
@@ -266,7 +266,7 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
     }
 
     // External interface for external callers
-    function getTablePlayers(uint256 tableId) virtual external view returns (address[] memory) {
+    function getTablePlayers(uint256 tableId) virtual public view returns (address[] memory) {
         return _getTablePlayers(tableId);
     }
 
