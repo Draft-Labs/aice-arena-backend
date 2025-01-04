@@ -49,4 +49,18 @@ contract PokerEvents {
         StraightFlush,
         RoyalFlush
     }
+
+    // Game state enum
+    enum GameState {
+        Idle,
+        PreFlop,
+        Flop,
+        Turn,
+        River,
+        Showdown,
+        HandComplete
+    }
+
+    // Game state change event
+    event GameStateChanged(uint256 indexed tableId, uint8 newState);
 }

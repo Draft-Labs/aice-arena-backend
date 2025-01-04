@@ -351,4 +351,143 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
         require(player == msg.sender || msg.sender == owner(), "Not authorized");
         return table.playerCards[player];
     }
+
+    // Game state management functions
+    function setGameState(uint256 tableId, GameState state) virtual internal {
+        tables[tableId].gameState = state;
+        emit GameStateChanged(tableId, uint8(state));
+    }
+
+    function getGameState(uint256 tableId) virtual public view returns (uint8) {
+        return uint8(tables[tableId].gameState);
+    }
+
+    function resetTableForNewHand(uint256 tableId) virtual internal {
+        Table storage table = tables[tableId];
+        delete table.communityCards;
+        resetBets(tableId);
+        table.pot = 0;
+        table.currentBet = 0;
+        table.roundComplete = false;
+        
+        // Reset player states
+        for (uint i = 0; i < table.playerAddresses.length; i++) {
+            address playerAddr = table.playerAddresses[i];
+            if (table.players[playerAddr].tableStake > 0) {
+                table.players[playerAddr].isActive = true;
+                table.players[playerAddr].currentBet = 0;
+                delete table.playerCards[playerAddr];
+            }
+        }
+    }
+
+    function isPlayerTurn(uint256 tableId, address player) virtual public view returns (bool) {
+        Table storage table = tables[tableId];
+        return table.playerAddresses[table.currentPosition] == player;
+    }
+
+    function isPlayerActive(uint256 tableId, address player) virtual public view returns (bool) {
+        return tables[tableId].players[player].isActive;
+    }
+
+    function setPlayerActive(uint256 tableId, address player, bool active) virtual internal {
+        tables[tableId].players[player].isActive = active;
+    }
+
+    function setPlayerHasActed(uint256 tableId, address player, bool hasActed) virtual internal {
+        tables[tableId].hasActed[tables[tableId].players[player].position] = hasActed;
+    }
+
+    function getPlayerCurrentBet(uint256 tableId, address player) virtual public view returns (uint256) {
+        return tables[tableId].players[player].currentBet;
+    }
+
+    function getTableCurrentBet(uint256 tableId) virtual public view returns (uint256) {
+        return tables[tableId].currentBet;
+    }
+
+    function getPlayerTableStake(uint256 tableId, address player) virtual public view returns (uint256) {
+        return tables[tableId].players[player].tableStake;
+    }
+
+    function updatePlayerBet(uint256 tableId, address player, uint256 betAmount) virtual internal {
+        Table storage table = tables[tableId];
+        Player storage p = table.players[player];
+        
+        require(p.tableStake >= betAmount, "Insufficient table stake");
+        
+        p.tableStake -= betAmount;
+        p.currentBet += betAmount;
+        table.pot += betAmount;
+        
+        if (betAmount > table.currentBet) {
+            table.currentBet = betAmount;
+        }
+    }
+
+    function getTableBigBlind(uint256 tableId) virtual public view returns (uint256) {
+        return tables[tableId].bigBlind;
+    }
+
+    function getTableSmallBlind(uint256 tableId) virtual public view returns (uint256) {
+        return tables[tableId].smallBlind;
+    }
+
+    function getTablePot(uint256 tableId) virtual public view returns (uint256) {
+        return tables[tableId].pot;
+    }
+
+    function awardPotToPlayer(uint256 tableId, address winner) virtual internal {
+        Table storage table = tables[tableId];
+        Player storage player = table.players[winner];
+        
+        uint256 potAmount = table.pot;
+        player.tableStake += potAmount;
+        table.pot = 0;
+    }
+
+    function getPlayerCount(uint256 tableId) virtual public view returns (uint256) {
+        return tables[tableId].playerCount;
+    }
+
+    function getCurrentPlayer(uint256 tableId) virtual public view returns (address) {
+        Table storage table = tables[tableId];
+        if (table.currentPosition >= table.playerAddresses.length) {
+            return address(0);
+        }
+        return table.playerAddresses[table.currentPosition];
+    }
+
+    function hasNextActivePlayer(uint256 tableId) virtual public view returns (bool) {
+        Table storage table = tables[tableId];
+        uint256 startingPosition = table.currentPosition;
+        
+        
+        for (uint256 i = 1; i <= table.playerAddresses.length; i++) {
+            uint256 nextPosition = (startingPosition + i) % table.playerAddresses.length;
+            address nextPlayer = table.playerAddresses[nextPosition];
+            
+            if (nextPlayer != address(0) && table.players[nextPlayer].isActive) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function isRoundComplete(uint256 tableId) virtual public view returns (bool) {
+        Table storage table = tables[tableId];
+        
+        // Check if all active players have acted
+        for (uint i = 0; i < table.playerAddresses.length; i++) {
+            address playerAddr = table.playerAddresses[i];
+            if (table.players[playerAddr].isActive && !table.hasActed[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    function getCommunityCards(uint256 tableId) virtual public view returns (uint8[] memory) {
+        return tables[tableId].communityCards;
+    }
 }
