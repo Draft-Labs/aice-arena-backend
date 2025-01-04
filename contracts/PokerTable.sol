@@ -77,7 +77,8 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
         uint256 bigBlind,
         uint256 minBet,
         uint256 maxBet
-    ) public virtual onlyOwner returns (uint256) {
+    ) public virtual returns (uint256) {
+        if (owner() != msg.sender) revert OnlyOwnerAllowed();
         // Validate inputs
         if (minBuyIn >= maxBuyIn) revert InvalidBuyIn();
         if (minBet >= maxBet) revert InvalidBetLimits();
@@ -244,7 +245,8 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
         uint256 tableId,
         uint256 newMinBet,
         uint256 newMaxBet
-    ) external onlyOwner {
+    ) external {
+        if (owner() != msg.sender) revert OnlyOwnerAllowed();
         Table storage table = tables[tableId];
         require(table.isActive, "Table not active");
         require(table.gameState == GameState.Waiting, "Game in progress");

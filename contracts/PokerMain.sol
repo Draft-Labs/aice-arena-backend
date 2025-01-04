@@ -10,17 +10,12 @@ import "./PokerHandEval.sol";
 import "./PokerGameplay.sol";
 
 contract PokerMain is PokerGameplay {
-    // Configuration
-    address payable public treasuryAddress;
-
     constructor(
         uint256 _minBetAmount, 
         address payable _treasuryAddress
     ) 
         PokerGameplay(_minBetAmount, _treasuryAddress)
-    {
-        treasuryAddress = _treasuryAddress;
-    }
+    {}
 
     // Table creation
     function createTable(
@@ -36,13 +31,12 @@ contract PokerMain is PokerGameplay {
 
     // Join table
     function joinTable(uint256 tableId, uint256 buyInAmount) public override nonReentrant {
-        require(
-            treasury.getPlayerBalance(msg.sender) >= buyInAmount,
-            "Insufficient balance in treasury"
-        );
+        if (tables[tableId].playerCount >= maxPlayersPerTable) revert TableFull();
+        if (buyInAmount < tables[tableId].minBuyIn || buyInAmount > tables[tableId].maxBuyIn) revert InvalidBuyIn();
+        if (treasury.getPlayerBalance(msg.sender) < buyInAmount) revert("Insufficient balance in treasury");
 
         // Process buy-in through treasury
-        HouseTreasury(treasuryAddress).processBetLoss(msg.sender, buyInAmount);
+        treasury.processBetLoss(msg.sender, buyInAmount);
         
         // Join table through inherited function
         super.joinTable(tableId, buyInAmount);
@@ -60,7 +54,7 @@ contract PokerMain is PokerGameplay {
         
         uint256 remainingStake = super.getPlayerTableStake(tableId, msg.sender);
         if (remainingStake > 0) {
-            HouseTreasury(treasuryAddress).processBetWin(msg.sender, remainingStake);
+            treasury.processBetWin(msg.sender, remainingStake);
         }
         
         super.leaveTable(tableId);
