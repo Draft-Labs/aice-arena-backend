@@ -9,41 +9,25 @@ import "./PokerTable.sol";
 import "./PokerHandEval.sol";
 import "./PokerGameplay.sol";
 
-contract PokerMain is Ownable, ReentrancyGuard {
-    // Contract references
-    HouseTreasury public treasury;
-    PokerHandEval public handEvaluator;
-    PokerTable public tableManager;
-    PokerGameplay public gameManager;
-
+contract PokerMain is Ownable, ReentrancyGuard, PokerEvents, PokerHandEval, PokerTable, PokerGameplay {
     // Configuration
-    uint256 public minBetAmount;
     uint256 public maxTables = 10;
     uint256 public maxPlayersPerTable = 6; // 5 players + house
+    address payable public treasuryAddress;
 
     // Mappings
     mapping(address => uint256) public playerTables; // Which table a player is at
 
-    // Error messages
-    error TableFull();
-    error InvalidBuyIn();
-    error PlayerNotAtTable();
-    error InvalidBetAmount();
-    error NotPlayerTurn();
-    error InvalidGameState();
-    error InsufficientBalance();
-    error TableNotActive();
-    error InvalidBetLimits();
-    error OnlyOwnerAllowed();
-
-    constructor(uint256 _minBetAmount, address payable _treasuryAddress) Ownable(msg.sender) {
-        minBetAmount = _minBetAmount;
-        treasury = HouseTreasury(_treasuryAddress);
-        
-        // Initialize contracts
-        handEvaluator = new PokerHandEval();
-        tableManager = new PokerTable();
-        gameManager = new PokerGameplay(address(handEvaluator), address(tableManager));
+    constructor(
+        uint256 _minBetAmount, 
+        address payable _treasuryAddress
+    ) 
+        Ownable(msg.sender)
+        PokerHandEval()
+        PokerTable(_minBetAmount, _treasuryAddress)
+        PokerGameplay(address(this), address(this))
+    {
+        treasuryAddress = _treasuryAddress;
     }
 
     // Table creation
@@ -55,7 +39,7 @@ contract PokerMain is Ownable, ReentrancyGuard {
         uint256 minBet,
         uint256 maxBet
     ) external onlyOwner returns (uint256) {
-        return tableManager.createTable(minBuyIn, maxBuyIn, smallBlind, bigBlind, minBet, maxBet);
+        return super.createTable(minBuyIn, maxBuyIn, smallBlind, bigBlind, minBet, maxBet);
     }
 
     // Join table
@@ -66,15 +50,15 @@ contract PokerMain is Ownable, ReentrancyGuard {
         );
 
         // Process buy-in through treasury
-        treasury.processBetLoss(msg.sender, buyInAmount);
+        HouseTreasury(treasuryAddress).processBetLoss(msg.sender, buyInAmount);
         
-        // Join table through table manager
-        tableManager.joinTable(tableId, msg.sender, buyInAmount);
+        // Join table through inherited function
+        super.joinTable(tableId, msg.sender, buyInAmount);
         playerTables[msg.sender] = tableId;
 
         // Start game if enough players
-        if (tableManager.getPlayerCount(tableId) >= 2) {
-            gameManager.startNewHand(tableId);
+        if (super.getPlayerCount(tableId) >= 2) {
+            super.startNewHand(tableId);
         }
     }
 
@@ -82,30 +66,30 @@ contract PokerMain is Ownable, ReentrancyGuard {
     function leaveTable(uint256 tableId) external nonReentrant {
         require(playerTables[msg.sender] == tableId, "Player not at this table");
         
-        uint256 remainingStake = tableManager.getPlayerTableStake(tableId, msg.sender);
+        uint256 remainingStake = super.getPlayerTableStake(tableId, msg.sender);
         if (remainingStake > 0) {
-            treasury.processBetWin(msg.sender, remainingStake);
+            HouseTreasury(treasuryAddress).processBetWin(msg.sender, remainingStake);
         }
         
-        tableManager.leaveTable(tableId, msg.sender);
+        super.leaveTable(tableId, msg.sender);
         delete playerTables[msg.sender];
     }
 
     // Game actions
     function placeBet(uint256 tableId, uint256 betAmount) external {
-        gameManager.placeBet(tableId, betAmount);
+        super.placeBet(tableId, betAmount);
     }
 
     function fold(uint256 tableId) external {
-        gameManager.fold(tableId);
+        super.fold(tableId);
     }
 
     function check(uint256 tableId) external {
-        gameManager.check(tableId);
+        super.check(tableId);
     }
 
     function call(uint256 tableId) external {
-        gameManager.call(tableId);
+        super.call(tableId);
     }
 
     // View functions
@@ -121,7 +105,7 @@ contract PokerMain is Ownable, ReentrancyGuard {
         uint8 gameState,
         bool isActive
     ) {
-        return tableManager.getTableInfo(tableId);
+        return super.getTableInfo(tableId);
     }
 
     function getPlayerInfo(uint256 tableId, address player) external view returns (
@@ -131,10 +115,10 @@ contract PokerMain is Ownable, ReentrancyGuard {
         bool isSittingOut,
         uint256 position
     ) {
-        return tableManager.getPlayerInfo(tableId, player);
+        return super.getPlayerInfo(tableId, player);
     }
 
     function getTablePlayers(uint256 tableId) external view returns (address[] memory) {
-        return tableManager.getTablePlayers(tableId);
+        return super.getTablePlayers(tableId);
     }
 }

@@ -8,16 +8,7 @@ import "./PokerTable.sol";
 import "./PokerHandEval.sol";
 
 contract PokerGameplay is PokerEvents {
-    enum GameState {
-        Waiting,    // Waiting for players
-        Dealing,    // Cards being dealt
-        PreFlop,    // Initial betting round
-        Flop,       // After first 3 community cards
-        Turn,       // After 4th community card
-        River,      // After 5th community card
-        Showdown,   // Revealing hands
-        Complete    // Game finished
-    }
+    // Using GameState from PokerTable
 
     // References to other contracts
     PokerHandEval private handEvaluator;
@@ -38,7 +29,7 @@ contract PokerGameplay is PokerEvents {
         _;
     }
 
-    modifier onlyDuringState(uint256 tableId, GameState state) {
+    modifier onlyDuringState(uint256 tableId, PokerTable.GameState state) {
         require(tableManager.getTableState(tableId) == uint8(state), "Invalid game state");
         _;
     }
@@ -46,7 +37,7 @@ contract PokerGameplay is PokerEvents {
     // Game flow functions
     function startNewHand(uint256 tableId) internal {
         // Reset game state
-        tableManager.setGameState(tableId, GameState.Dealing);
+        tableManager.setGameState(tableId, PokerTable.GameState.Dealing);
         tableManager.resetTableForNewHand(tableId);
         
         // Deal new cards to active players
@@ -120,7 +111,7 @@ contract PokerGameplay is PokerEvents {
     }
 
     function postBlinds(uint256 tableId) external onlyValidTable(tableId) {
-        require(tableManager.getGameState(tableId) == uint8(GameState.PreFlop), "Not in PreFlop state");
+        require(tableManager.getGameState(tableId) == uint8(PokerTable.GameState.PreFlop), "Not in PreFlop state");
         
         // Get players from table manager
         address[] memory players = tableManager.getTablePlayers(tableId);
@@ -149,28 +140,28 @@ contract PokerGameplay is PokerEvents {
         tableManager.resetRound(tableId);
         
         uint8 currentState = tableManager.getGameState(tableId);
-        if (currentState == uint8(GameState.PreFlop)) {
-            tableManager.setGameState(tableId, GameState.Flop);
+        if (currentState == uint8(PokerTable.GameState.PreFlop)) {
+            tableManager.setGameState(tableId, PokerTable.GameState.Flop);
             // Deal flop cards
             uint8[] memory flopCards = new uint8[](3);
             flopCards[0] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "flop1"))) % 52 + 1);
             flopCards[1] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "flop2"))) % 52 + 1);
             flopCards[2] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "flop3"))) % 52 + 1);
             dealCommunityCards(tableId, flopCards);
-        } else if (currentState == uint8(GameState.Flop)) {
-            tableManager.setGameState(tableId, GameState.Turn);
+        } else if (currentState == uint8(PokerTable.GameState.Flop)) {
+            tableManager.setGameState(tableId, PokerTable.GameState.Turn);
             // Deal turn card
             uint8[] memory turnCard = new uint8[](1);
             turnCard[0] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "turn"))) % 52 + 1);
             dealCommunityCards(tableId, turnCard);
-        } else if (currentState == uint8(GameState.Turn)) {
-            tableManager.setGameState(tableId, GameState.River);
+        } else if (currentState == uint8(PokerTable.GameState.Turn)) {
+            tableManager.setGameState(tableId, PokerTable.GameState.River);
             // Deal river card
             uint8[] memory riverCard = new uint8[](1);
             riverCard[0] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "river"))) % 52 + 1);
             dealCommunityCards(tableId, riverCard);
-        } else if (currentState == uint8(GameState.River)) {
-            tableManager.setGameState(tableId, GameState.Showdown);
+        } else if (currentState == uint8(PokerTable.GameState.River)) {
+            tableManager.setGameState(tableId, PokerTable.GameState.Showdown);
             determineWinner(tableId);
         }
     }
@@ -226,13 +217,13 @@ contract PokerGameplay is PokerEvents {
             emit HandWinner(tableId, winner, highestRank, potAmount);
         }
 
-        tableManager.setGameState(tableId, GameState.Complete);
+        tableManager.setGameState(tableId, PokerTable.GameState.Complete);
         
         // Start new hand if enough players
         if (tableManager.getPlayerCount(tableId) >= 2) {
             startNewHand(tableId);
         } else {
-            tableManager.setGameState(tableId, GameState.Waiting);
+            tableManager.setGameState(tableId, PokerTable.GameState.Waiting);
         }
     }
 
@@ -270,7 +261,7 @@ contract PokerGameplay is PokerEvents {
     }
 
     function startFlop(uint256 tableId) external onlyValidTable(tableId) {
-        require(tableManager.getGameState(tableId) == uint8(GameState.PreFlop), "Not in PreFlop state");
+        require(tableManager.getGameState(tableId) == uint8(PokerTable.GameState.PreFlop), "Not in PreFlop state");
         require(tableManager.isRoundComplete(tableId), "Not all players have acted");
         
         // Deal flop cards
@@ -280,11 +271,11 @@ contract PokerGameplay is PokerEvents {
         flopCards[2] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "flop3"))) % 52 + 1);
         
         dealCommunityCards(tableId, flopCards);
-        tableManager.setGameState(tableId, GameState.Flop);
+        tableManager.setGameState(tableId, PokerTable.GameState.Flop);
     }
 
     function startTurn(uint256 tableId) external onlyValidTable(tableId) {
-        require(tableManager.getGameState(tableId) == uint8(GameState.Flop), "Not in Flop state");
+        require(tableManager.getGameState(tableId) == uint8(PokerTable.GameState.Flop), "Not in Flop state");
         require(tableManager.isRoundComplete(tableId), "Not all players have acted");
 
         // Deal turn card
@@ -292,11 +283,11 @@ contract PokerGameplay is PokerEvents {
         turnCard[0] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "turn"))) % 52 + 1);
         
         dealCommunityCards(tableId, turnCard);
-        tableManager.setGameState(tableId, GameState.Turn);
+        tableManager.setGameState(tableId, PokerTable.GameState.Turn);
     }
 
     function startRiver(uint256 tableId) external onlyValidTable(tableId) {
-        require(tableManager.getGameState(tableId) == uint8(GameState.Turn), "Not in Turn state");
+        require(tableManager.getGameState(tableId) == uint8(PokerTable.GameState.Turn), "Not in Turn state");
         require(tableManager.isRoundComplete(tableId), "Not all players have acted");
 
         // Deal river card
@@ -304,11 +295,11 @@ contract PokerGameplay is PokerEvents {
         riverCard[0] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, tableId, "river"))) % 52 + 1);
         
         dealCommunityCards(tableId, riverCard);
-        tableManager.setGameState(tableId, GameState.River);
+        tableManager.setGameState(tableId, PokerTable.GameState.River);
     }
 
     function startShowdown(uint256 tableId) external onlyValidTable(tableId) {
-        require(tableManager.getGameState(tableId) == uint8(GameState.River), "Invalid game state");
+        require(tableManager.getGameState(tableId) == uint8(PokerTable.GameState.River), "Invalid game state");
         require(tableManager.isRoundComplete(tableId), "Not all players have acted");
 
         tableManager.setGameState(tableId, GameState.Showdown);

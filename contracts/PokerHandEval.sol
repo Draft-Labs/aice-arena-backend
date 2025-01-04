@@ -1,19 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-contract PokerHandEval {
-    enum HandRank { 
-        HighCard,
-        Pair,
-        TwoPair,
-        ThreeOfAKind,
-        Straight,
-        Flush,
-        FullHouse,
-        FourOfAKind,
-        StraightFlush,
-        RoyalFlush
-    }
+import "./PokerEvents.sol";
+
+contract PokerHandEval is PokerEvents {
 
     // Evaluate a poker hand and return its rank and score
     function evaluateHand(uint8[] memory cards) public pure returns (HandRank, uint256) {

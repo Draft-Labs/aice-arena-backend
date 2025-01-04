@@ -1,8 +1,8 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("Poker", function () {
-    let Poker;
+describe("PokerMain", function () {
+    let PokerMain;
     let HouseTreasury;
     let poker;
     let treasury;
@@ -23,9 +23,9 @@ describe("Poker", function () {
         // Set minimum bet amount
         minBetAmount = ethers.parseEther("0.01");
 
-        // Deploy Poker
-        Poker = await ethers.getContractFactory("Poker");
-        poker = await Poker.deploy(minBetAmount, await treasury.getAddress());
+        // Deploy PokerMain
+        PokerMain = await ethers.getContractFactory("PokerMain");
+        poker = await PokerMain.deploy(minBetAmount, await treasury.getAddress());
 
         // Authorize Poker contract in Treasury
         await treasury.authorizeGame(await poker.getAddress());
@@ -44,7 +44,7 @@ describe("Poker", function () {
         });
 
         it("Should set the correct treasury address", async function () {
-            expect(await poker.treasury()).to.equal(await treasury.getAddress());
+            expect(await poker.treasuryAddress()).to.equal(await treasury.getAddress());
         });
     });
 
@@ -169,9 +169,115 @@ describe("Poker", function () {
         });
     });
 
+    describe("Hand Evaluation", function () {
+        it("Should correctly evaluate a royal flush", async function () {
+            const cards = [1, 13, 12, 11, 10]; // Ace, King, Queen, Jack, 10 of hearts
+            const [rank, score] = await poker.evaluateHand(cards);
+            expect(rank).to.equal(9); // RoyalFlush enum value
+        });
+
+        it("Should correctly evaluate a pair", async function () {
+            const cards = [1, 14, 27, 40, 2]; // Two aces and three random cards
+            const [rank, score] = await poker.evaluateHand(cards);
+            expect(rank).to.equal(1); // Pair enum value
+        });
+    });
+
     describe("Game Flow", function () {
-        // Add tests for game flow, betting rounds, etc.
-        // This section will be expanded as more game logic is implemented
+        let tableId;
+        const buyIn = ethers.parseEther("1");
+
+        beforeEach(async function () {
+            // Create table
+            await poker.createTable(
+                ethers.parseEther("1"),
+                ethers.parseEther("10"),
+                ethers.parseEther("0.01"),
+                ethers.parseEther("0.02"),
+                ethers.parseEther("0.02"),
+                ethers.parseEther("2")
+            );
+            tableId = 0;
+
+            // Fund player accounts in treasury
+            await treasury.connect(player1).openAccount({ value: buyIn });
+            await treasury.connect(player2).openAccount({ value: buyIn });
+            
+            // Join players to table
+            await poker.connect(player1).joinTable(tableId, buyIn);
+            await poker.connect(player2).joinTable(tableId, buyIn);
+        });
+
+        it("Should allow players to place bets", async function () {
+            const betAmount = ethers.parseEther("0.05");
+            await poker.connect(player1).placeBet(tableId, betAmount);
+            
+            const playerInfo = await poker.getPlayerInfo(tableId, player1.address);
+            expect(playerInfo.currentBet).to.equal(betAmount);
+        });
+
+        it("Should allow players to fold", async function () {
+            await poker.connect(player1).fold(tableId);
+            
+            const playerInfo = await poker.getPlayerInfo(tableId, player1.address);
+            expect(playerInfo.isActive).to.be.false;
+        });
+
+        it("Should allow players to check", async function () {
+            await poker.connect(player1).check(tableId);
+            
+            const playerInfo = await poker.getPlayerInfo(tableId, player1.address);
+            expect(playerInfo.isActive).to.be.true;
+        });
+
+        it("Should allow players to call", async function () {
+            const betAmount = ethers.parseEther("0.05");
+            await poker.connect(player1).placeBet(tableId, betAmount);
+            await poker.connect(player2).call(tableId);
+            
+            const player2Info = await poker.getPlayerInfo(tableId, player2.address);
+            expect(player2Info.currentBet).to.equal(betAmount);
+        });
+    });
+
+    describe("Game State Management", function () {
+        let tableId;
+        const buyIn = ethers.parseEther("1");
+
+        beforeEach(async function () {
+            await poker.createTable(
+                ethers.parseEther("1"),
+                ethers.parseEther("10"),
+                ethers.parseEther("0.01"),
+                ethers.parseEther("0.02"),
+                ethers.parseEther("0.02"),
+                ethers.parseEther("2")
+            );
+            tableId = 0;
+
+            await treasury.connect(player1).openAccount({ value: buyIn });
+            await treasury.connect(player2).openAccount({ value: buyIn });
+        });
+
+        it("Should transition through game states correctly", async function () {
+            // Join players
+            await poker.connect(player1).joinTable(tableId, buyIn);
+            await poker.connect(player2).joinTable(tableId, buyIn);
+
+            // Get initial state
+            const initialState = (await poker.getTableInfo(tableId)).gameState;
+            expect(initialState).to.equal(0); // Waiting state
+
+            // Verify state after players join
+            const stateAfterJoin = (await poker.getTableInfo(tableId)).gameState;
+            expect(stateAfterJoin).to.not.equal(0); // Should no longer be in Waiting state
+        });
+
+        it("Should emit correct events during state transitions", async function () {
+            await expect(poker.connect(player1).joinTable(tableId, buyIn))
+                .to.emit(poker, "PlayerJoined")
+                .withArgs(tableId, player1.address, buyIn);
+        });
     });
 
     describe("Bet Limits", function () {
