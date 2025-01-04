@@ -260,7 +260,7 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
     }
 
     // Add this function to get all players at a table
-    function getTablePlayers(uint256 tableId) virtual public view returns (address[] memory) {
+    function getTablePlayers(uint256 tableId) virtual external view returns (address[] memory) {
         Table storage table = tables[tableId];
         return table.playerAddresses;
     }

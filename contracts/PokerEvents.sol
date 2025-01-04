@@ -53,12 +53,14 @@ contract PokerEvents {
     // Game state enum
     enum GameState {
         Idle,
-        PreFlop,
-        Flop,
-        Turn,
-        River,
-        Showdown,
-        HandComplete
+        Waiting,    // Waiting for players
+        Dealing,    // Cards being dealt
+        PreFlop,    // Initial betting round
+        Flop,       // After first 3 community cards
+        Turn,       // After 4th community card
+        River,      // After 5th community card
+        Showdown,   // Revealing hands
+        Complete    // Game finished
     }
 
     // Game state change event
