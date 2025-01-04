@@ -18,7 +18,9 @@ contract PokerMain is PokerGameplay {
         address payable _treasuryAddress
     ) 
         PokerGameplay(_minBetAmount, _treasuryAddress)
-    {}
+    {
+        treasuryAddress = _treasuryAddress;
+    }
 
     // Table creation
     function createTable(
@@ -110,5 +112,10 @@ contract PokerMain is PokerGameplay {
 
     function getTablePlayers(uint256 tableId) public view override returns (address[] memory) {
         return super.getTablePlayers(tableId);
+    }
+
+    // Expose hand evaluation function
+    function evaluateHand(uint8[] memory cards) public view returns (HandRank, uint256) {
+        return handEvaluator.evaluateHand(cards);
     }
 }
