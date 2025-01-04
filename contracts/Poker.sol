@@ -1,116 +1,16 @@
 // SPDX-License-Identifier: MIT 
 pragma solidity ^0.8.20;
-import "hardhat/console.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "./HouseTreasury.sol";
-import "./PokerEvents.sol";
-import "./PokerHandEval.sol";
 
-contract Poker is Ownable, ReentrancyGuard, PokerEvents {
-    PokerHandEval private handEvaluator;
-    uint256 public minBetAmount;
-    HouseTreasury public treasury;
-    uint256 public maxTables = 10;
-    uint256 public maxPlayersPerTable = 6; // 5 players + house
-    
-    enum GameState {
-        Waiting,    // Waiting for players
-        Dealing,    // Cards being dealt
-        PreFlop,    // Initial betting round
-        Flop,       // After first 3 community cards
-        Turn,       // After 4th community card
-        River,      // After 5th community card
-        Showdown,   // Revealing hands
-        Complete    // Game finished
-    }
+import "./PokerMain.sol";
 
-    struct Player {
-        address playerAddress;
-        uint256 tableStake;     // Current chips at table
-        uint256 currentBet;     // Current bet in the round
-        bool isActive;          // Still in the current hand
-        bool isSittingOut;      // Temporarily sitting out
-        uint256 position;       // Position at table (0-5)
-    }
-
-    struct Table {
-        uint256 tableId;
-        uint256 minBuyIn;
-        uint256 maxBuyIn;
-        uint256 smallBlind;
-        uint256 bigBlind;
-        uint256 minBet;
-        uint256 maxBet;
-        uint256 pot;
-        uint256 currentBet;
-        uint256 dealerPosition;
-        uint256 currentPosition;
-        uint256 playerCount;
-        GameState gameState;
-        bool isActive;
-        mapping(address => Player) players;
-        address[] playerAddresses;
-        uint8[] communityCards;
-        mapping(address => uint8[]) playerCards;
-        mapping(uint256 => bool) hasActed;
-        bool roundComplete;
-    }
-
-    // Mappings for game state
-    mapping(uint256 => Table) public tables;
-    mapping(address => uint256) public playerTables; // Which table a player is at
-    uint256 public activeTableCount;
-
-    // Events
-    event TableCreated(uint256 indexed tableId, uint256 minBuyIn, uint256 maxBuyIn);
-    event PlayerJoined(uint256 indexed tableId, address indexed player, uint256 buyIn);
-    event PlayerLeft(uint256 indexed tableId, address indexed player, uint256 remainingStake);
-    event GameStarted(uint256 indexed tableId);
-    event BetPlaced(uint256 indexed tableId, address indexed player, uint256 amount);
-    event PlayerFolded(uint256 indexed tableId, address indexed player);
-    event HandComplete(uint256 indexed tableId, address indexed winner, uint256 pot);
-    event TableConfigUpdated(
-        uint256 indexed tableId,
-        uint256 minBet,
-        uint256 maxBet
-    );
-    event PlayerCardsDealt(uint256 indexed tableId, address indexed player, uint8[] cards);
-    event CommunityCardsDealt(uint256 indexed tableId, uint8[] cards);
-    event CardsDealt(uint256 indexed tableId, address indexed player, uint8[] cards);
-    event BlindsPosted(uint256 indexed tableId, address smallBlind, address bigBlind, uint256 smallBlindAmount, uint256 bigBlindAmount);
-    event HandWinner(uint256 indexed tableId, address indexed winner, PokerHandEval.HandRank winningHandRank, uint256 potAmount);
-    event TurnStarted(uint256 indexed tableId, address indexed player);
-    event TurnEnded(uint256 indexed tableId, address indexed player, string action);
-    event RoundComplete(uint256 indexed tableId);
-
-    // Error messages
-    error TableFull();
-    error InvalidBuyIn();
-    error PlayerNotAtTable();
-    error InvalidBetAmount();
-    error NotPlayerTurn();
-    error InvalidGameState();
-    error InsufficientBalance();
-    error TableNotActive();
-    error InvalidBetLimits();
-    error OnlyOwnerAllowed();
-
-    constructor(uint256 _minBetAmount, address payable _treasuryAddress) Ownable(msg.sender) {
-        minBetAmount = _minBetAmount;
-        treasury = HouseTreasury(_treasuryAddress);
-        handEvaluator = new PokerHandEval();
-    }
-
-    modifier onlyValidTable(uint256 tableId) {
-        require(tables[tableId].isActive, "Table does not exist");
-        _;
-    }
-
-    modifier onlyTablePlayer(uint256 tableId) {
-        require(tables[tableId].players[msg.sender].isActive, "Not a player at this table");
-        _;
-    }
+/**
+ * @title Poker
+ * @dev This contract is deprecated and exists only for backward compatibility.
+ * Please use PokerMain contract for all new integrations.
+ */
+contract Poker is PokerMain {
+    constructor(uint256 _minBetAmount, address payable _treasuryAddress) 
+        PokerMain(_minBetAmount, _treasuryAddress) {}
 
     modifier onlyDuringState(uint256 tableId, GameState state) {
         require(tables[tableId].gameState == state, "Invalid game state");
