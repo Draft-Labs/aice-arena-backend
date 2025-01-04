@@ -302,8 +302,7 @@ contract PokerGameplay is PokerEvents {
         require(tableManager.getGameState(tableId) == uint8(PokerTable.GameState.River), "Invalid game state");
         require(tableManager.isRoundComplete(tableId), "Not all players have acted");
 
-        tableManager.setGameState(tableId, GameState.Showdown);
+        tableManager.setGameState(tableId, PokerTable.GameState.Showdown);
         determineWinner(tableId);
     }
-}
 }
