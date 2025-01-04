@@ -50,6 +50,20 @@ contract PokerEvents {
         RoyalFlush
     }
 
+    // Hand rank enum for poker hand evaluation
+    enum HandRank {
+        HighCard,       // Highest value card
+        Pair,          // Two cards of the same value
+        TwoPair,       // Two different pairs
+        ThreeOfAKind,  // Three cards of the same value
+        Straight,      // Five cards in sequence
+        Flush,         // Five cards of the same suit
+        FullHouse,     // Three of a kind and a pair
+        FourOfAKind,   // Four cards of the same value
+        StraightFlush, // Straight of the same suit
+        RoyalFlush     // Royal straight flush
+    }
+
     // Game state enum
     enum GameState {
         Idle,
