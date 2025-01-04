@@ -36,22 +36,8 @@ contract PokerEvents {
     error InvalidBetLimits();
     error OnlyOwnerAllowed();
 
-    // HandRank enum needed for HandWinner event
+    // HandRank enum for poker hand evaluation and HandWinner event
     enum HandRank { 
-        HighCard,
-        Pair,
-        TwoPair,
-        ThreeOfAKind,
-        Straight,
-        Flush,
-        FullHouse,
-        FourOfAKind,
-        StraightFlush,
-        RoyalFlush
-    }
-
-    // Hand rank enum for poker hand evaluation
-    enum HandRank {
         HighCard,       // Highest value card
         Pair,          // Two cards of the same value
         TwoPair,       // Two different pairs
