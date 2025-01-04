@@ -12,17 +12,6 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
     uint256 public maxTables = 10;
     uint256 public maxPlayersPerTable = 6; // 5 players + house
 
-    enum GameState {
-        Waiting,    // Waiting for players
-        Dealing,    // Cards being dealt
-        PreFlop,    // Initial betting round
-        Flop,       // After first 3 community cards
-        Turn,       // After 4th community card
-        River,      // After 5th community card
-        Showdown,   // Revealing hands
-        Complete    // Game finished
-    }
-
     struct Player {
         address playerAddress;
         uint256 tableStake;     // Current chips at table
@@ -485,6 +474,19 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
             }
         }
         return true;
+    }
+
+    function resetRound(uint256 tableId) virtual internal {
+        Table storage table = tables[tableId];
+        
+        // Reset all player actions for the new round
+        for (uint i = 0; i < table.playerAddresses.length; i++) {
+            table.hasActed[i] = false;
+        }
+        
+        // Reset bets for the new round
+        resetBets(tableId);
+        table.currentBet = 0;
     }
 
     function getCommunityCards(uint256 tableId) virtual public view returns (uint8[] memory) {

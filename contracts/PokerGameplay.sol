@@ -8,9 +8,13 @@ import "./PokerTable.sol";
 import "./PokerHandEval.sol";
 
 contract PokerGameplay is PokerTable {
+    PokerHandEval public handEvaluator;
+
     constructor(uint256 _minBetAmount, address payable _treasuryAddress) 
         PokerTable(_minBetAmount, _treasuryAddress)
-    {}
+    {
+        handEvaluator = new PokerHandEval();
+    }
 
     // Inheriting modifiers from PokerTable
 
