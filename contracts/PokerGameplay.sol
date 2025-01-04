@@ -17,14 +17,14 @@ contract PokerGameplay is PokerTable {
     // Game flow functions
     function startNewHand(uint256 tableId) internal {
         // Reset game state
-        tableManager.setGameState(tableId, PokerTable.GameState.Dealing);
-        tableManager.resetTableForNewHand(tableId);
+        setGameState(tableId, GameState.Dealing);
+        resetTableForNewHand(tableId);
         
         // Deal new cards to active players
-        address[] memory players = tableManager.getTablePlayers(tableId);
+        address[] memory players = getTablePlayers(tableId);
         for (uint i = 0; i < players.length; i++) {
             address player = players[i];
-            if (tableManager.isPlayerActive(tableId, player)) {
+            if (isPlayerActive(tableId, player)) {
                 uint8[] memory cards = new uint8[](2);
                 cards[0] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, player, "card1"))) % 52 + 1);
                 cards[1] = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, player, "card2"))) % 52 + 1);
@@ -155,13 +155,13 @@ contract PokerGameplay is PokerTable {
         PokerHandEval.HandRank highestRank = PokerHandEval.HandRank.HighCard;
         uint256 highestScore = 0;
         
-        address[] memory players = tableManager.getTablePlayers(tableId);
+        address[] memory players = getTablePlayers(tableId);
         for (uint i = 0; i < players.length; i++) {
             address playerAddr = players[i];
-            if (tableManager.isPlayerActive(tableId, playerAddr)) {
+            if (isPlayerActive(tableId, playerAddr)) {
                 // Get player's cards and community cards
-                uint8[] memory playerCards = tableManager.getPlayerCards(tableId, playerAddr);
-                uint8[] memory communityCards = tableManager.getCommunityCards(tableId);
+                uint8[] memory playerCards = getPlayerCards(tableId, playerAddr);
+                uint8[] memory communityCards = getCommunityCards(tableId);
                 uint8[] memory allCards = new uint8[](7);
                 
                 // Combine player cards and community cards
@@ -187,21 +187,21 @@ contract PokerGameplay is PokerTable {
         
         // Award pot to winner
         if (winner != address(0)) {
-            uint256 potAmount = tableManager.getTablePot(tableId);
-            tableManager.awardPotToPlayer(tableId, winner);
+            uint256 potAmount = getTablePot(tableId);
+            awardPotToPlayer(tableId, winner);
             
             // Emit events
             emit HandComplete(tableId, winner, potAmount);
             emit HandWinner(tableId, winner, highestRank, potAmount);
         }
 
-        tableManager.setGameState(tableId, PokerTable.GameState.Complete);
+        setGameState(tableId, GameState.Complete);
         
         // Start new hand if enough players
-        if (tableManager.getPlayerCount(tableId) >= 2) {
+        if (getPlayerCount(tableId) >= 2) {
             startNewHand(tableId);
         } else {
-            tableManager.setGameState(tableId, PokerTable.GameState.Waiting);
+            setGameState(tableId, GameState.Waiting);
         }
     }
 
@@ -210,10 +210,10 @@ contract PokerGameplay is PokerTable {
         onlyValidTable(tableId) 
         onlyTablePlayer(tableId) 
     {
-        require(tableManager.isPlayerTurn(tableId, msg.sender), "Not your turn");
-        require(tableManager.getPlayerCurrentBet(tableId, msg.sender) == tableManager.getTableCurrentBet(tableId), "Cannot check");
+        require(isPlayerTurn(tableId, msg.sender), "Not your turn");
+        require(getPlayerCurrentBet(tableId, msg.sender) == getTableCurrentBet(tableId), "Cannot check");
         
-        tableManager.setPlayerHasActed(tableId, msg.sender, true);
+        setPlayerHasActed(tableId, msg.sender, true);
         
         emit TurnEnded(tableId, msg.sender, "check");
         moveToNextPlayer(tableId);
@@ -224,13 +224,13 @@ contract PokerGameplay is PokerTable {
         onlyValidTable(tableId) 
         onlyTablePlayer(tableId) 
     {
-        require(tableManager.isPlayerTurn(tableId, msg.sender), "Not your turn");
+        require(isPlayerTurn(tableId, msg.sender), "Not your turn");
         
-        uint256 callAmount = tableManager.getTableCurrentBet(tableId) - tableManager.getPlayerCurrentBet(tableId, msg.sender);
-        require(tableManager.getPlayerTableStake(tableId, msg.sender) >= callAmount, "Insufficient funds");
+        uint256 callAmount = getTableCurrentBet(tableId) - getPlayerCurrentBet(tableId, msg.sender);
+        require(getPlayerTableStake(tableId, msg.sender) >= callAmount, "Insufficient funds");
         
-        tableManager.updatePlayerBet(tableId, msg.sender, callAmount);
-        tableManager.setPlayerHasActed(tableId, msg.sender, true);
+        updatePlayerBet(tableId, msg.sender, callAmount);
+        setPlayerHasActed(tableId, msg.sender, true);
         
         emit BetPlaced(tableId, msg.sender, callAmount);
         emit TurnEnded(tableId, msg.sender, "call");
@@ -239,8 +239,8 @@ contract PokerGameplay is PokerTable {
     }
 
     function startFlop(uint256 tableId) external onlyValidTable(tableId) {
-        require(tableManager.getGameState(tableId) == uint8(PokerTable.GameState.PreFlop), "Not in PreFlop state");
-        require(tableManager.isRoundComplete(tableId), "Not all players have acted");
+        require(getGameState(tableId) == uint8(GameState.PreFlop), "Not in PreFlop state");
+        require(isRoundComplete(tableId), "Not all players have acted");
         
         // Deal flop cards
         uint8[] memory flopCards = new uint8[](3);
