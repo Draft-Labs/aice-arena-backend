@@ -156,7 +156,7 @@ contract PokerGameplay is PokerTable {
     function determineWinner(uint256 tableId) internal {
         // Find player with highest hand
         address winner;
-        PokerHandEval.HandRank highestRank = PokerHandEval.HandRank.HighCard;
+        HandRank highestRank = HandRank.HighCard;
         uint256 highestScore = 0;
         
         address[] memory players = _getTablePlayers(tableId);
@@ -176,7 +176,7 @@ contract PokerGameplay is PokerTable {
                 }
                 
                 // Evaluate hand
-                (PokerHandEval.HandRank rank, uint256 score) = handEvaluator.evaluateHand(allCards);
+                (HandRank rank, uint256 score) = handEvaluator.evaluateHand(allCards);
                 
                 // Update winner if this hand is better
                 if (winner == address(0) || 
