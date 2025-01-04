@@ -259,10 +259,15 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
         emit TableConfigUpdated(tableId, newMinBet, newMaxBet);
     }
 
-    // Add this function to get all players at a table
-    function getTablePlayers(uint256 tableId) virtual external view returns (address[] memory) {
+    // Internal function for derived contracts
+    function _getTablePlayers(uint256 tableId) internal view returns (address[] memory) {
         Table storage table = tables[tableId];
         return table.playerAddresses;
+    }
+
+    // External interface for external callers
+    function getTablePlayers(uint256 tableId) virtual external view returns (address[] memory) {
+        return _getTablePlayers(tableId);
     }
 
     // Internal helper functions

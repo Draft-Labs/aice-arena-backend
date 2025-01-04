@@ -25,7 +25,7 @@ contract PokerGameplay is PokerTable {
         resetTableForNewHand(tableId);
         
         // Deal new cards to active players
-        address[] memory players = getTablePlayers(tableId);
+        address[] memory players = _getTablePlayers(tableId);
         for (uint i = 0; i < players.length; i++) {
             address player = players[i];
             if (isPlayerActive(tableId, player)) {
@@ -97,7 +97,7 @@ contract PokerGameplay is PokerTable {
         require(getGameState(tableId) == uint8(GameState.PreFlop), "Not in PreFlop state");
         
         // Get players from table manager
-        address[] memory players = getTablePlayers(tableId);
+        address[] memory players = _getTablePlayers(tableId);
         require(players.length >= 2, "Need at least 2 players");
         
         // Post small blind (Player 0)
@@ -159,7 +159,7 @@ contract PokerGameplay is PokerTable {
         PokerHandEval.HandRank highestRank = PokerHandEval.HandRank.HighCard;
         uint256 highestScore = 0;
         
-        address[] memory players = getTablePlayers(tableId);
+        address[] memory players = _getTablePlayers(tableId);
         for (uint i = 0; i < players.length; i++) {
             address playerAddr = players[i];
             if (isPlayerActive(tableId, playerAddr)) {
