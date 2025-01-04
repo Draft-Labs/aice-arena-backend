@@ -16,6 +16,18 @@ contract PokerGameplay is PokerTable {
         handEvaluator = new PokerHandEval();
     }
 
+    // Override createTable to maintain inheritance chain
+    function createTable(
+        uint256 minBuyIn,
+        uint256 maxBuyIn,
+        uint256 smallBlind,
+        uint256 bigBlind,
+        uint256 minBet,
+        uint256 maxBet
+    ) virtual external override onlyOwner returns (uint256) {
+        return super.createTable(minBuyIn, maxBuyIn, smallBlind, bigBlind, minBet, maxBet);
+    }
+
     // Inheriting modifiers from PokerTable
 
     // Game flow functions
