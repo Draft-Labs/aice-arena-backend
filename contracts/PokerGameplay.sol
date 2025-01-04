@@ -7,32 +7,12 @@ import "./PokerEvents.sol";
 import "./PokerTable.sol";
 import "./PokerHandEval.sol";
 
-contract PokerGameplay is PokerEvents {
-    // Using GameState from PokerTable
+contract PokerGameplay is PokerTable {
+    constructor(uint256 _minBetAmount, address payable _treasuryAddress) 
+        PokerTable(_minBetAmount, _treasuryAddress)
+    {}
 
-    // References to other contracts
-    PokerHandEval private handEvaluator;
-    PokerTable private tableManager;
-
-    constructor(address _handEvaluator, address _tableManager) {
-        handEvaluator = PokerHandEval(_handEvaluator);
-        tableManager = PokerTable(_tableManager);
-    }
-
-    modifier onlyValidTable(uint256 tableId) {
-        require(tableManager.isTableActive(tableId), "Table does not exist");
-        _;
-    }
-
-    modifier onlyTablePlayer(uint256 tableId) {
-        require(tableManager.isPlayerAtTable(tableId, msg.sender), "Not a player at this table");
-        _;
-    }
-
-    modifier onlyDuringState(uint256 tableId, PokerTable.GameState state) {
-        require(tableManager.getTableState(tableId) == uint8(state), "Invalid game state");
-        _;
-    }
+    // Inheriting modifiers from PokerTable
 
     // Game flow functions
     function startNewHand(uint256 tableId) internal {
@@ -55,14 +35,13 @@ contract PokerGameplay is PokerEvents {
         emit GameStarted(tableId);
     }
 
-    function dealPlayerCards(uint256 tableId, address player, uint8[] memory cards) internal {
+    function dealPlayerCards(uint256 tableId, address player, uint8[] memory cards) internal override {
         require(cards.length == 2, "Invalid number of cards");
-        tableManager.setPlayerCards(tableId, player, cards);
-        emit PlayerCardsDealt(tableId, player, cards);
+        super.dealPlayerCards(tableId, player, cards);
     }
 
     function fold(uint256 tableId) 
-        external 
+        virtual external 
         onlyValidTable(tableId) 
         onlyTablePlayer(tableId) 
     {
@@ -80,7 +59,7 @@ contract PokerGameplay is PokerEvents {
     }
 
     function placeBet(uint256 tableId, uint256 betAmount) 
-        external 
+        virtual external 
         onlyValidTable(tableId) 
         onlyTablePlayer(tableId) 
     {
@@ -96,16 +75,16 @@ contract PokerGameplay is PokerEvents {
         emit BetPlaced(tableId, msg.sender, betAmount);
     }
 
-    function moveToNextPlayer(uint256 tableId) internal {
-        tableManager.moveToNextPlayer(tableId);
+    function moveToNextPlayer(uint256 tableId) internal override {
+        super.moveToNextPlayer(tableId);
         
         // Get current player for the event
-        address currentPlayer = tableManager.getCurrentPlayer(tableId);
+        address currentPlayer = getCurrentPlayer(tableId);
         if (currentPlayer != address(0)) {
             emit TurnStarted(tableId, currentPlayer);
         }
 
-        if (!tableManager.hasNextActivePlayer(tableId) || tableManager.isRoundComplete(tableId)) {
+        if (!hasNextActivePlayer(tableId) || isRoundComplete(tableId)) {
             advanceGameState(tableId);
         }
     }
@@ -166,9 +145,8 @@ contract PokerGameplay is PokerEvents {
         }
     }
 
-    function dealCommunityCards(uint256 tableId, uint8[] memory cards) internal {
-        tableManager.addCommunityCards(tableId, cards);
-        emit CommunityCardsDealt(tableId, cards);
+    function dealCommunityCards(uint256 tableId, uint8[] memory cards) internal override {
+        super.dealCommunityCards(tableId, cards);
     }
 
     function determineWinner(uint256 tableId) internal {
@@ -228,7 +206,7 @@ contract PokerGameplay is PokerEvents {
     }
 
     function check(uint256 tableId) 
-        external 
+        virtual external 
         onlyValidTable(tableId) 
         onlyTablePlayer(tableId) 
     {
@@ -242,7 +220,7 @@ contract PokerGameplay is PokerEvents {
     }
 
     function call(uint256 tableId) 
-        external 
+        virtual external 
         onlyValidTable(tableId) 
         onlyTablePlayer(tableId) 
     {
