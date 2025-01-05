@@ -2,11 +2,12 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+// Removed Ownable import as we're using custom owner checks
 import "./HouseTreasury.sol";
 import "./PokerEvents.sol";
 
-contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
+contract PokerTable is ReentrancyGuard, PokerEvents {
+    address private _owner;
     uint256 public minBetAmount;
     HouseTreasury public treasury;
     uint256 public maxTables = 10;
@@ -49,9 +50,18 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
     mapping(address => uint256) public playerTables; // Which table a player is at
     uint256 public activeTableCount;
 
-    constructor(uint256 _minBetAmount, address payable _treasuryAddress) Ownable(msg.sender) {
+    constructor(uint256 _minBetAmount, address payable _treasuryAddress) {
+        _owner = msg.sender;
         minBetAmount = _minBetAmount;
         treasury = HouseTreasury(_treasuryAddress);
+    }
+
+    function owner() public view returns (address) {
+        return _owner;
+    }
+
+    function treasuryAddress() public view returns (address) {
+        return address(treasury);
     }
 
     modifier onlyValidTable(uint256 tableId) {
@@ -78,7 +88,7 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
         uint256 minBet,
         uint256 maxBet
     ) public virtual returns (uint256) {
-        if (owner() != msg.sender) revert OnlyOwnerAllowed();
+        if (msg.sender != owner()) revert OnlyOwnerAllowed();
         // Validate inputs
         if (minBuyIn >= maxBuyIn) revert InvalidBuyIn();
         if (minBet >= maxBet) revert InvalidBetLimits();
@@ -246,7 +256,7 @@ contract PokerTable is Ownable, ReentrancyGuard, PokerEvents {
         uint256 newMinBet,
         uint256 newMaxBet
     ) external {
-        if (owner() != msg.sender) revert OnlyOwnerAllowed();
+        if (msg.sender != owner()) revert OnlyOwnerAllowed();
         Table storage table = tables[tableId];
         require(table.isActive, "Table not active");
         require(table.gameState == GameState.Waiting, "Game in progress");

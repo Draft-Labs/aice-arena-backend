@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+// Removed Ownable import as we're using custom owner checks
 import "./PokerEvents.sol";
 import "./PokerTable.sol";
 import "./PokerHandEval.sol";
@@ -24,7 +24,8 @@ contract PokerGameplay is PokerTable {
         uint256 bigBlind,
         uint256 minBet,
         uint256 maxBet
-    ) public virtual override onlyOwner returns (uint256) {
+    ) public virtual override returns (uint256) {
+        if (msg.sender != owner()) revert OnlyOwnerAllowed();
         return super.createTable(minBuyIn, maxBuyIn, smallBlind, bigBlind, minBet, maxBet);
     }
 

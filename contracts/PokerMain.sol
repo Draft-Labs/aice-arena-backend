@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+// Removed Ownable import as we're using custom owner checks
 import "./HouseTreasury.sol";
 import "./PokerEvents.sol";
 import "./PokerTable.sol";
@@ -25,15 +25,17 @@ contract PokerMain is PokerGameplay {
         uint256 bigBlind,
         uint256 minBet,
         uint256 maxBet
-    ) public override onlyOwner returns (uint256) {
+    ) public override returns (uint256) {
+        if (msg.sender != owner()) revert OnlyOwnerAllowed();
         return super.createTable(minBuyIn, maxBuyIn, smallBlind, bigBlind, minBet, maxBet);
     }
 
     // Join table
     function joinTable(uint256 tableId, uint256 buyInAmount) public override nonReentrant {
+        require(tables[tableId].isActive, "Table does not exist");
         if (tables[tableId].playerCount >= maxPlayersPerTable) revert TableFull();
         if (buyInAmount < tables[tableId].minBuyIn || buyInAmount > tables[tableId].maxBuyIn) revert InvalidBuyIn();
-        if (treasury.getPlayerBalance(msg.sender) < buyInAmount) revert("Insufficient balance in treasury");
+        if (treasury.getPlayerBalance(msg.sender) < buyInAmount) revert InvalidBuyIn();
 
         // Process buy-in through treasury
         treasury.processBetLoss(msg.sender, buyInAmount);
@@ -109,7 +111,7 @@ contract PokerMain is PokerGameplay {
     }
 
     // Expose hand evaluation function
-    function evaluateHand(uint8[] memory cards) public view returns (HandRank, uint256) {
+    function evaluateHand(uint8[] memory cards) external view returns (HandRank, uint256) {
         return handEvaluator.evaluateHand(cards);
     }
 }
