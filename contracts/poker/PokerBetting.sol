@@ -18,6 +18,7 @@ contract PokerBetting is Ownable, ReentrancyGuard {
     event BetPlaced(uint256 indexed tableId, address indexed player, uint256 amount);
     event BlindsPosted(uint256 indexed tableId, address smallBlind, address bigBlind, uint256 smallBlindAmount, uint256 bigBlindAmount);
     event PotAwarded(uint256 indexed tableId, address indexed winner, uint256 amount);
+    event PlayerFolded(uint256 indexed tableId, address indexed player);
 
     // Error messages
     error InvalidBetAmount();
@@ -93,18 +94,31 @@ contract PokerBetting is Ownable, ReentrancyGuard {
         ) = pokerTable.getTableInfo(tableId);
 
         // Get player info
-        (uint256 tableStake, uint256 currentBet, bool isActive,,) = pokerTable.getPlayerInfo(tableId, msg.sender);
+        (uint256 tableStake, uint256 currentBet, bool isActive,, bool inHand) = pokerTable.getPlayerInfo(tableId, msg.sender);
 
         // Validate call
-        if (!isActive) revert NotYourTurn();
+        if (!isActive || !inHand) revert NotYourTurn();
+        if (!pokerTable.isPlayerTurn(tableId, msg.sender)) revert NotYourTurn();
         if (gameState == IPokerTable.GameState.Waiting || 
             gameState == IPokerTable.GameState.Complete) revert InvalidGameState();
 
-        uint256 callAmount = getCurrentBet(tableId) - currentBet;
+        uint256 maxBet = getCurrentBet(tableId);
+        if (maxBet <= currentBet) revert InvalidBetAmount();
+        
+        uint256 callAmount = maxBet - currentBet;
         if (callAmount > tableStake) revert InsufficientBalance();
 
-        // Process call
-        _processBet(tableId, msg.sender, callAmount);
+        // Process call by setting the bet equal to maxBet
+        bool success = pokerTable.updatePlayerBet(tableId, msg.sender, maxBet, tableStake - callAmount);
+        if (!success) revert BetProcessingFailed();
+        
+        // Update pot
+        (,,,,,, uint256 currentPot,,) = pokerTable.getTableInfo(tableId);
+        success = pokerTable.updatePot(tableId, currentPot + callAmount);
+        if (!success) revert BetProcessingFailed();
+
+        // Advance to next player
+        pokerTable.advanceToNextPlayer(tableId);
 
         emit BetPlaced(tableId, msg.sender, callAmount);
     }
@@ -113,14 +127,57 @@ contract PokerBetting is Ownable, ReentrancyGuard {
      * @dev Allows a player to check (bet 0)
      */
     function check(uint256 tableId) external nonReentrant {
+        // Get table info
+        (
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            IPokerTable.GameState gameState
+        ) = pokerTable.getTableInfo(tableId);
+
         // Get player info
-        (, uint256 currentBet, bool isActive,,) = pokerTable.getPlayerInfo(tableId, msg.sender);
+        (uint256 tableStake, uint256 currentBet, bool isActive,, bool inHand) = pokerTable.getPlayerInfo(tableId, msg.sender);
 
         // Validate check
-        if (!isActive) revert NotYourTurn();
-        if (currentBet != getCurrentBet(tableId)) revert CannotCheck();
+        if (!isActive || !inHand) revert NotYourTurn();
+        if (!pokerTable.isPlayerTurn(tableId, msg.sender)) revert NotYourTurn();
+        
+        uint256 maxBet = getCurrentBet(tableId);
+        if (currentBet < maxBet) revert CannotCheck();
+        
+        if (gameState == IPokerTable.GameState.Waiting || 
+            gameState == IPokerTable.GameState.Complete) revert InvalidGameState();
+
+        // Advance to next player
+        pokerTable.advanceToNextPlayer(tableId);
 
         emit BetPlaced(tableId, msg.sender, 0);
+    }
+
+    /**
+     * @dev Allows a player to fold their hand
+     */
+    function fold(uint256 tableId) external nonReentrant {
+        // Get player info
+        (,, bool isActive,, bool inHand) = pokerTable.getPlayerInfo(tableId, msg.sender);
+
+        // Validate fold
+        if (!isActive || !inHand) revert NotYourTurn();
+        if (!pokerTable.isPlayerTurn(tableId, msg.sender)) revert NotYourTurn();
+
+        // Process fold
+        bool success = pokerTable.fold(tableId, msg.sender);
+        if (!success) revert BetProcessingFailed();
+
+        // Advance to next player
+        pokerTable.advanceToNextPlayer(tableId);
+
+        emit PlayerFolded(tableId, msg.sender);
     }
 
     /**
@@ -141,20 +198,25 @@ contract PokerBetting is Ownable, ReentrancyGuard {
         ) = pokerTable.getTableInfo(tableId);
 
         // Get player info
-        (uint256 tableStake,, bool isActive,,) = pokerTable.getPlayerInfo(tableId, msg.sender);
+        (uint256 tableStake, uint256 currentBet, bool isActive,, bool inHand) = pokerTable.getPlayerInfo(tableId, msg.sender);
 
         // Validate raise
-        if (!isActive) revert NotYourTurn();
+        if (!isActive || !inHand) revert NotYourTurn();
+        if (!pokerTable.isPlayerTurn(tableId, msg.sender)) revert NotYourTurn();
         if (gameState == IPokerTable.GameState.Waiting || 
             gameState == IPokerTable.GameState.Complete) revert InvalidGameState();
 
         uint256 currentTableBet = getCurrentBet(tableId);
-        if (raiseAmount <= currentTableBet * 2) revert InvalidBetAmount();
+        uint256 minRaiseAmount = currentTableBet * 2;
+        if (raiseAmount < minRaiseAmount) revert InvalidBetAmount();
         if (raiseAmount > maxBet) revert InvalidBetAmount();
         if (raiseAmount > tableStake) revert InsufficientBalance();
 
         // Process raise
         _processBet(tableId, msg.sender, raiseAmount);
+
+        // Advance to next player
+        pokerTable.advanceToNextPlayer(tableId);
 
         emit BetPlaced(tableId, msg.sender, raiseAmount);
     }
@@ -188,6 +250,11 @@ contract PokerBetting is Ownable, ReentrancyGuard {
         // Post big blind (Player 1)
         address bigBlindPlayer = players[1];
         _processBet(tableId, bigBlindPlayer, bigBlindAmount);
+
+        // Set the turn to the first player after the big blind (Player 2 or Player 0 in heads-up)
+        uint256 nextPlayerIndex = players.length > 2 ? 2 : 0;
+        bool success = pokerTable.updateCurrentPlayer(tableId, players[nextPlayerIndex]);
+        require(success, "Failed to update current player");
 
         emit BlindsPosted(tableId, smallBlindPlayer, bigBlindPlayer, smallBlindAmount, bigBlindAmount);
     }
@@ -225,21 +292,19 @@ contract PokerBetting is Ownable, ReentrancyGuard {
     // Internal functions
     function _processBet(uint256 tableId, address player, uint256 amount) internal {
         // Get current player info
-        (uint256 tableStake,,,, ) = pokerTable.getPlayerInfo(tableId, player);
+        (uint256 tableStake, uint256 currentBet,,, ) = pokerTable.getPlayerInfo(tableId, player);
         
         // Calculate new stake
         uint256 newStake = tableStake - amount;
         
         // Update player's bet and stake
-        bool success = pokerTable.updatePlayerBet(tableId, player, amount, newStake);
+        bool success = pokerTable.updatePlayerBet(tableId, player, currentBet + amount, newStake);
         if (!success) revert BetProcessingFailed();
         
         // Update pot
-        success = pokerTable.updatePot(tableId, amount);
+        (,,,,,, uint256 currentPot,,) = pokerTable.getTableInfo(tableId);
+        success = pokerTable.updatePot(tableId, currentPot + amount);
         if (!success) revert BetProcessingFailed();
-        
-        // Advance to next player
-        pokerTable.advanceToNextPlayer(tableId);
     }
 
     function _processWin(uint256 tableId, address winner, uint256 amount) internal {

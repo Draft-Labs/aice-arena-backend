@@ -278,9 +278,6 @@ contract PokerTable is IPokerTable, Ownable, ReentrancyGuard {
             }
         }
 
-        // Set first player
-        table.currentPlayer = table.playerAddresses[0];
-
         emit GameStarted(tableId);
         return true;
     }
@@ -322,10 +319,12 @@ contract PokerTable is IPokerTable, Ownable, ReentrancyGuard {
         // For now, just deal dummy cards
         for (uint256 i = 0; i < table.playerAddresses.length; i++) {
             Player storage player = table.players[table.playerAddresses[i]];
-            if (player.isActive && player.inHand) {
+            if (player.isActive && !player.isSittingOut) {
+                player.inHand = true;
                 player.holeCards = new PokerHandEvaluator.Card[](2);
                 player.holeCards[0] = PokerHandEvaluator.Card(uint8(i % 4), uint8(2 + (i * 2) % 13));
                 player.holeCards[1] = PokerHandEvaluator.Card(uint8((i + 1) % 4), uint8(3 + (i * 2) % 13));
+                player.cardsRevealed = false;
             }
         }
 
@@ -379,6 +378,59 @@ contract PokerTable is IPokerTable, Ownable, ReentrancyGuard {
     }
 
     // Player action functions
+    function updateCurrentPlayer(uint256 tableId, address player) external returns (bool) {
+        if (msg.sender != address(bettingContract)) revert NotAuthorized();
+        
+        Table storage table = tables[tableId];
+        Player storage playerData = table.players[player];
+        
+        if (!table.isActive) revert TableNotFound();
+        if (!playerData.isActive || !playerData.inHand) revert PlayerNotFound();
+
+        table.currentPlayer = player;
+        return true;
+    }
+
+    function advanceToNextPlayer(uint256 tableId) public override returns (bool) {
+        if (msg.sender != address(bettingContract) && msg.sender != address(gameState)) revert NotAuthorized();
+        
+        Table storage table = tables[tableId];
+        if (!table.isActive) revert TableNotFound();
+
+        // Find current player index
+        uint256 currentIndex;
+        for (uint256 i = 0; i < table.playerAddresses.length; i++) {
+            if (table.playerAddresses[i] == table.currentPlayer) {
+                currentIndex = i;
+                break;
+            }
+        }
+
+        // Find next active player
+        uint256 nextIndex = (currentIndex + 1) % table.playerAddresses.length;
+        while (nextIndex != currentIndex) {
+            Player storage nextPlayer = table.players[table.playerAddresses[nextIndex]];
+            if (nextPlayer.isActive && nextPlayer.inHand && !nextPlayer.isSittingOut) {
+                table.currentPlayer = table.playerAddresses[nextIndex];
+                return true;
+            }
+            nextIndex = (nextIndex + 1) % table.playerAddresses.length;
+        }
+
+        // If we've gone through all players, move to next game state
+        if (table.gameState == GameState.PreFlop) {
+            gameState.dealFlop(tableId);
+        } else if (table.gameState == GameState.Flop) {
+            gameState.dealTurn(tableId);
+        } else if (table.gameState == GameState.Turn) {
+            gameState.dealRiver(tableId);
+        } else if (table.gameState == GameState.River) {
+            gameState.startShowdown(tableId);
+        }
+
+        return true;
+    }
+
     function fold(uint256 tableId, address player) external override returns (bool) {
         if (msg.sender != address(bettingContract)) revert NotAuthorized();
         
@@ -434,37 +486,6 @@ contract PokerTable is IPokerTable, Ownable, ReentrancyGuard {
 
         advanceToNextPlayer(tableId);
         return true;
-    }
-
-    // Internal functions
-    function advanceToNextPlayer(uint256 tableId) public override returns (bool) {
-        if (msg.sender != address(bettingContract) && msg.sender != address(this)) revert NotAuthorized();
-        
-        Table storage table = tables[tableId];
-        if (!table.isActive) revert TableNotFound();
-
-        // Find current player index
-        uint256 currentIndex;
-        for (uint256 i = 0; i < table.playerAddresses.length; i++) {
-            if (table.playerAddresses[i] == table.currentPlayer) {
-                currentIndex = i;
-                break;
-            }
-        }
-
-        // Find next active player
-        uint256 nextIndex = (currentIndex + 1) % table.playerAddresses.length;
-        while (nextIndex != currentIndex) {
-            Player storage nextPlayer = table.players[table.playerAddresses[nextIndex]];
-            if (nextPlayer.isActive && nextPlayer.inHand && !nextPlayer.isSittingOut) {
-                table.currentPlayer = table.playerAddresses[nextIndex];
-                return true;
-            }
-            nextIndex = (nextIndex + 1) % table.playerAddresses.length;
-        }
-
-        // If we get here, no other active players were found
-        return false;
     }
 
     // Stake and pot management
@@ -525,7 +546,7 @@ contract PokerTable is IPokerTable, Ownable, ReentrancyGuard {
         Player storage playerData = table.players[winner];
         
         if (!table.isActive) revert TableNotFound();
-        if (!playerData.isActive) revert PlayerNotFound();
+        if (!playerData.isActive || !playerData.inHand) revert PlayerNotFound();
 
         playerData.tableStake += amount;
         table.pot = 0;

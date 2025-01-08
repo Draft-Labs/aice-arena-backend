@@ -126,4 +126,7 @@ interface IPokerTable {
     function check(uint256 tableId, address player) external returns (bool);
     function call(uint256 tableId, address player) external returns (bool);
     function raise(uint256 tableId, address player, uint256 amount) external returns (bool);
+
+    // Player action functions
+    function updateCurrentPlayer(uint256 tableId, address player) external returns (bool);
 } 

@@ -46,8 +46,8 @@ contract PokerGameState is Ownable {
      * @dev Starts a new game at the table
      */
     function startGame(uint256 tableId) external {
-        // Only the poker table contract can call this
-        if (msg.sender != address(pokerTable)) revert NotAuthorized();
+        // Allow both owner and poker table to call this
+        if (msg.sender != address(pokerTable) && msg.sender != owner()) revert NotAuthorized();
 
         // Get table info
         (
@@ -80,8 +80,8 @@ contract PokerGameState is Ownable {
      * @dev Deals hole cards to players
      */
     function dealHoleCards(uint256 tableId) external {
-        // Only the poker table contract can call this
-        if (msg.sender != address(pokerTable)) revert NotAuthorized();
+        // Allow both owner and poker table to call this
+        if (msg.sender != address(pokerTable) && msg.sender != owner()) revert NotAuthorized();
 
         // Get table info
         (
@@ -111,8 +111,8 @@ contract PokerGameState is Ownable {
      * @dev Deals the flop
      */
     function dealFlop(uint256 tableId) external {
-        // Only the poker table contract can call this
-        if (msg.sender != address(pokerTable)) revert NotAuthorized();
+        // Allow both owner and poker table to call this
+        if (msg.sender != address(pokerTable) && msg.sender != owner()) revert NotAuthorized();
 
         // Get table info
         (
@@ -145,8 +145,8 @@ contract PokerGameState is Ownable {
      * @dev Deals the turn
      */
     function dealTurn(uint256 tableId) external {
-        // Only the poker table contract can call this
-        if (msg.sender != address(pokerTable)) revert NotAuthorized();
+        // Allow both owner and poker table to call this
+        if (msg.sender != address(pokerTable) && msg.sender != owner()) revert NotAuthorized();
 
         // Get table info
         (
@@ -179,8 +179,8 @@ contract PokerGameState is Ownable {
      * @dev Deals the river
      */
     function dealRiver(uint256 tableId) external {
-        // Only the poker table contract can call this
-        if (msg.sender != address(pokerTable)) revert NotAuthorized();
+        // Allow both owner and poker table to call this
+        if (msg.sender != address(pokerTable) && msg.sender != owner()) revert NotAuthorized();
 
         // Get table info
         (
@@ -213,8 +213,8 @@ contract PokerGameState is Ownable {
      * @dev Initiates the showdown
      */
     function startShowdown(uint256 tableId) external {
-        // Only the poker table contract can call this
-        if (msg.sender != address(pokerTable)) revert NotAuthorized();
+        // Allow both owner and poker table to call this
+        if (msg.sender != address(pokerTable) && msg.sender != owner()) revert NotAuthorized();
 
         // Get table info
         (
@@ -243,8 +243,8 @@ contract PokerGameState is Ownable {
      * @dev Determines the winner and awards the pot
      */
     function determineWinner(uint256 tableId) external {
-        // Only the poker table contract can call this
-        if (msg.sender != address(pokerTable)) revert NotAuthorized();
+        // Allow both owner and poker table to call this
+        if (msg.sender != address(pokerTable) && msg.sender != owner()) revert NotAuthorized();
 
         // Get table info
         (

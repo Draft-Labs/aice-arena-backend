@@ -1,18 +1,20 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const { parseEther } = ethers;
 
 describe("Poker Game", function () {
     let PokerTable, PokerBetting, PokerPlayerManager, PokerGameState, PokerTreasury, PokerHandEvaluator;
     let pokerTable, pokerBetting, pokerPlayerManager, pokerGameState, pokerTreasury;
     let owner, player1, player2, player3;
-    const SMALL_BLIND = parseEther("0.001");
-    const BIG_BLIND = parseEther("0.002");
-    const MIN_BUY_IN = parseEther("0.1");
-    const MAX_BUY_IN = parseEther("1.0");
+    let SMALL_BLIND, BIG_BLIND, MIN_BUY_IN, MAX_BUY_IN;
 
     beforeEach(async function () {
         [owner, player1, player2, player3] = await ethers.getSigners();
+
+        // Set up constants using ethers
+        SMALL_BLIND = ethers.parseEther("0.001");
+        BIG_BLIND = ethers.parseEther("0.002");
+        MIN_BUY_IN = ethers.parseEther("0.1");
+        MAX_BUY_IN = ethers.parseEther("1.0");
 
         // Deploy contracts
         PokerTable = await ethers.getContractFactory("PokerTable");
@@ -108,22 +110,22 @@ describe("Poker Game", function () {
         });
 
         it("Should start game when enough players join", async function () {
-            await pokerTable.startGame(0);
+            await pokerGameState.startGame(0);
             const tableInfo = await pokerTable.getTableInfo(0);
             expect(tableInfo.currentState).to.equal(2); // PreFlop
         });
 
         it("Should deal cards to players", async function () {
-            await pokerTable.startGame(0);
-            await pokerTable.dealCards(0);
+            await pokerGameState.startGame(0);
+            await pokerGameState.dealHoleCards(0);
             
             const player1Cards = await pokerTable.getPlayerCards(0, player1.address);
             expect(player1Cards.holeCards.length).to.equal(2);
         });
 
         it("Should handle betting rounds", async function () {
-            await pokerTable.startGame(0);
-            await pokerTable.dealCards(0);
+            await pokerGameState.startGame(0);
+            await pokerGameState.dealHoleCards(0);
 
             // Post blinds
             await pokerBetting.postBlinds(0);
@@ -135,7 +137,7 @@ describe("Poker Game", function () {
             await pokerBetting.connect(player2).check(0);
 
             // Deal flop
-            await pokerTable.dealFlop(0);
+            await pokerGameState.dealFlop(0);
             const communityCards = await pokerTable.getCommunityCards(0);
             expect(communityCards.length).to.equal(3);
         });
@@ -147,8 +149,8 @@ describe("Poker Game", function () {
             const buyIn = MIN_BUY_IN;
             await pokerPlayerManager.connect(player1).joinTable(0, buyIn, { value: buyIn });
             await pokerPlayerManager.connect(player2).joinTable(0, buyIn, { value: buyIn });
-            await pokerTable.startGame(0);
-            await pokerTable.dealCards(0);
+            await pokerGameState.startGame(0);
+            await pokerGameState.dealHoleCards(0);
             await pokerBetting.postBlinds(0);
         });
 
@@ -156,14 +158,14 @@ describe("Poker Game", function () {
             await pokerBetting.connect(player1).call(0);
             await pokerBetting.connect(player2).check(0);
             const tableInfo = await pokerTable.getTableInfo(0);
-            expect(tableInfo.pot).to.equal(SMALL_BLIND.add(BIG_BLIND));
+            expect(tableInfo.pot).to.equal(SMALL_BLIND + BIG_BLIND + (BIG_BLIND - SMALL_BLIND));
         });
 
         it("Should allow players to raise", async function () {
-            const raiseAmount = BIG_BLIND.mul(2);
+            const raiseAmount = BIG_BLIND * 2n;
             await pokerBetting.connect(player1).raise(0, raiseAmount);
             const tableInfo = await pokerTable.getTableInfo(0);
-            expect(tableInfo.pot).to.be.gt(SMALL_BLIND.add(BIG_BLIND));
+            expect(tableInfo.pot).to.be.gt(SMALL_BLIND + BIG_BLIND);
         });
 
         it("Should allow players to fold", async function () {
@@ -179,51 +181,51 @@ describe("Poker Game", function () {
             const buyIn = MIN_BUY_IN;
             await pokerPlayerManager.connect(player1).joinTable(0, buyIn, { value: buyIn });
             await pokerPlayerManager.connect(player2).joinTable(0, buyIn, { value: buyIn });
-            await pokerTable.startGame(0);
+            await pokerGameState.startGame(0);
         });
 
         it("Should progress through all game states", async function () {
             // PreFlop
-            await pokerTable.dealCards(0);
+            await pokerGameState.dealHoleCards(0);
             await pokerBetting.postBlinds(0);
             await pokerBetting.connect(player1).call(0);
             await pokerBetting.connect(player2).check(0);
 
             // Flop
-            await pokerTable.dealFlop(0);
+            await pokerGameState.dealFlop(0);
             await pokerBetting.connect(player1).check(0);
             await pokerBetting.connect(player2).check(0);
 
             // Turn
-            await pokerTable.dealTurn(0);
+            await pokerGameState.dealTurn(0);
             await pokerBetting.connect(player1).check(0);
             await pokerBetting.connect(player2).check(0);
 
             // River
-            await pokerTable.dealRiver(0);
+            await pokerGameState.dealRiver(0);
             await pokerBetting.connect(player1).check(0);
             await pokerBetting.connect(player2).check(0);
 
             // Showdown
-            await pokerTable.startShowdown(0);
+            await pokerGameState.startShowdown(0);
             const tableInfo = await pokerTable.getTableInfo(0);
             expect(tableInfo.currentState).to.equal(6); // Showdown
         });
 
         it("Should determine winner and award pot", async function () {
-            await pokerTable.dealCards(0);
+            await pokerGameState.dealHoleCards(0);
             await pokerBetting.postBlinds(0);
             await pokerBetting.connect(player1).call(0);
             await pokerBetting.connect(player2).check(0);
 
             // Progress to showdown
-            await pokerTable.dealFlop(0);
-            await pokerTable.dealTurn(0);
-            await pokerTable.dealRiver(0);
-            await pokerTable.startShowdown(0);
+            await pokerGameState.dealFlop(0);
+            await pokerGameState.dealTurn(0);
+            await pokerGameState.dealRiver(0);
+            await pokerGameState.startShowdown(0);
 
             // Determine winner
-            await pokerTable.determineWinner(0);
+            await pokerGameState.determineWinner(0);
             const tableInfo = await pokerTable.getTableInfo(0);
             expect(tableInfo.pot).to.equal(0); // Pot should be awarded
         });
