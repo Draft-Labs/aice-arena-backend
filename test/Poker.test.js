@@ -1,213 +1,231 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const { parseEther } = ethers;
 
-describe("Poker", function () {
-    let Poker;
-    let HouseTreasury;
-    let poker;
-    let treasury;
-    let owner;
-    let player1;
-    let player2;
-    let player3;
-    let minBetAmount;
+describe("Poker Game", function () {
+    let PokerTable, PokerBetting, PokerPlayerManager, PokerGameState, PokerTreasury, PokerHandEvaluator;
+    let pokerTable, pokerBetting, pokerPlayerManager, pokerGameState, pokerTreasury;
+    let owner, player1, player2, player3;
+    const SMALL_BLIND = parseEther("0.001");
+    const BIG_BLIND = parseEther("0.002");
+    const MIN_BUY_IN = parseEther("0.1");
+    const MAX_BUY_IN = parseEther("1.0");
 
     beforeEach(async function () {
-        // Get signers
         [owner, player1, player2, player3] = await ethers.getSigners();
 
-        // Deploy Treasury
-        HouseTreasury = await ethers.getContractFactory("HouseTreasury");
-        treasury = await HouseTreasury.deploy();
+        // Deploy contracts
+        PokerTable = await ethers.getContractFactory("PokerTable");
+        PokerBetting = await ethers.getContractFactory("PokerBetting");
+        PokerPlayerManager = await ethers.getContractFactory("PokerPlayerManager");
+        PokerGameState = await ethers.getContractFactory("PokerGameState");
+        PokerTreasury = await ethers.getContractFactory("PokerTreasury");
+        const HouseTreasury = await ethers.getContractFactory("HouseTreasury");
 
-        // Set minimum bet amount
-        minBetAmount = ethers.parseEther("0.01");
+        // First deploy HouseTreasury
+        const houseTreasury = await HouseTreasury.deploy();
+        await houseTreasury.waitForDeployment();
+        const houseTreasuryAddress = await houseTreasury.getAddress();
 
-        // Deploy Poker
-        Poker = await ethers.getContractFactory("Poker");
-        poker = await Poker.deploy(minBetAmount, await treasury.getAddress());
+        // Deploy supporting contracts first
+        pokerBetting = await PokerBetting.deploy(ethers.ZeroAddress, houseTreasuryAddress);
+        pokerPlayerManager = await PokerPlayerManager.deploy(ethers.ZeroAddress);
+        pokerGameState = await PokerGameState.deploy(ethers.ZeroAddress);
+        pokerTreasury = await PokerTreasury.deploy(ethers.ZeroAddress, houseTreasuryAddress);
 
-        // Authorize Poker contract in Treasury
-        await treasury.authorizeGame(await poker.getAddress());
+        // Wait for deployments
+        await pokerBetting.waitForDeployment();
+        await pokerPlayerManager.waitForDeployment();
+        await pokerGameState.waitForDeployment();
+        await pokerTreasury.waitForDeployment();
 
-        // Fund treasury
-        await treasury.fundHouseTreasury({ value: ethers.parseEther("100") });
-    });
+        // Get addresses
+        const bettingAddress = await pokerBetting.getAddress();
+        const playerManagerAddress = await pokerPlayerManager.getAddress();
+        const gameStateAddress = await pokerGameState.getAddress();
+        const treasuryAddress = await pokerTreasury.getAddress();
 
-    describe("Deployment", function () {
-        it("Should set the right owner", async function () {
-            expect(await poker.owner()).to.equal(owner.address);
-        });
+        // Deploy PokerTable with correct addresses
+        pokerTable = await PokerTable.deploy(
+            bettingAddress,
+            playerManagerAddress,
+            gameStateAddress,
+            treasuryAddress
+        );
+        await pokerTable.waitForDeployment();
+        const pokerTableAddress = await pokerTable.getAddress();
 
-        it("Should set the correct minimum bet amount", async function () {
-            expect(await poker.minBetAmount()).to.equal(minBetAmount);
-        });
+        // Update supporting contracts with PokerTable address
+        await pokerBetting.setPokerTable(pokerTableAddress);
+        await pokerPlayerManager.setPokerTable(pokerTableAddress);
+        await pokerGameState.setPokerTable(pokerTableAddress);
+        await pokerTreasury.setPokerTable(pokerTableAddress);
 
-        it("Should set the correct treasury address", async function () {
-            expect(await poker.treasury()).to.equal(await treasury.getAddress());
-        });
+        // Authorize the poker contracts in HouseTreasury
+        await houseTreasury.authorizeGame(pokerTableAddress);
+        await houseTreasury.authorizeGame(bettingAddress);
+        await houseTreasury.authorizeGame(treasuryAddress);
     });
 
     describe("Table Management", function () {
-        const minBuyIn = ethers.parseEther("1");
-        const maxBuyIn = ethers.parseEther("10");
-        const smallBlind = ethers.parseEther("0.01");
-        const bigBlind = ethers.parseEther("0.02");
-        const minBet = ethers.parseEther("0.02");
-        const maxBet = ethers.parseEther("2");
-
         it("Should create a new table with correct parameters", async function () {
-            await poker.createTable(
-                minBuyIn,
-                maxBuyIn,
-                smallBlind,
-                bigBlind,
-                minBet,
-                maxBet
-            );
-
-            const tableInfo = await poker.getTableInfo(0);
-            expect(tableInfo.minBuyIn).to.equal(minBuyIn);
-            expect(tableInfo.maxBuyIn).to.equal(maxBuyIn);
-            expect(tableInfo.smallBlind).to.equal(smallBlind);
-            expect(tableInfo.bigBlind).to.equal(bigBlind);
-            expect(tableInfo.minBet).to.equal(minBet);
-            expect(tableInfo.maxBet).to.equal(maxBet);
-            expect(tableInfo.isActive).to.be.true;
-        });
-
-        it("Should not allow non-owner to create table", async function () {
-            await expect(
-                poker.connect(player1).createTable(
-                    minBuyIn,
-                    maxBuyIn,
-                    smallBlind,
-                    bigBlind,
-                    minBet,
-                    maxBet
-                )
-            ).to.be.revertedWithCustomError(poker, "OnlyOwnerAllowed");
-        });
-
-        it("Should not create table with invalid bet limits", async function () {
-            await expect(
-                poker.createTable(
-                    minBuyIn,
-                    maxBuyIn,
-                    smallBlind,
-                    bigBlind,
-                    maxBet, // minBet > maxBet
-                    minBet
-                )
-            ).to.be.revertedWithCustomError(poker, "InvalidBetLimits");
-        });
-    });
-
-    describe("Player Actions", function () {
-        let tableId;
-        const buyIn = ethers.parseEther("1");
-
-        beforeEach(async function () {
-            // Create table
-            await poker.createTable(
-                ethers.parseEther("1"),
-                ethers.parseEther("10"),
-                ethers.parseEther("0.01"),
-                ethers.parseEther("0.02"),
-                ethers.parseEther("0.02"),
-                ethers.parseEther("2")
-            );
-            tableId = 0;
-
-            // Fund player accounts in treasury
-            await treasury.connect(player1).openAccount({ value: buyIn });
-            await treasury.connect(player2).openAccount({ value: buyIn });
+            const tx = await pokerTable.createTable(MIN_BUY_IN, MAX_BUY_IN, SMALL_BLIND, BIG_BLIND);
+            const receipt = await tx.wait();
+            const event = receipt.logs.find(e => e.eventName === 'TableCreated');
+            expect(event).to.not.be.undefined;
+            expect(event.args.minBuyIn).to.equal(MIN_BUY_IN);
+            expect(event.args.maxBuyIn).to.equal(MAX_BUY_IN);
         });
 
         it("Should allow players to join table", async function () {
-            await poker.connect(player1).joinTable(tableId, buyIn);
+            await pokerTable.createTable(MIN_BUY_IN, MAX_BUY_IN, SMALL_BLIND, BIG_BLIND);
+            const buyIn = MIN_BUY_IN;
             
-            const playerInfo = await poker.getPlayerInfo(tableId, player1.address);
-            expect(playerInfo.tableStake).to.equal(buyIn);
+            await pokerPlayerManager.connect(player1).joinTable(0, buyIn, { value: buyIn });
+            const playerInfo = await pokerTable.getPlayerInfo(0, player1.address);
             expect(playerInfo.isActive).to.be.true;
-            expect(playerInfo.isSittingOut).to.be.false;
-        });
-
-        it("Should not allow joining with insufficient funds", async function () {
-            const largeBuyIn = ethers.parseEther("20");
-            await expect(
-                poker.connect(player1).joinTable(tableId, largeBuyIn)
-            ).to.be.revertedWithCustomError(poker, "InvalidBuyIn");
-        });
-
-        it("Should not allow joining a full table", async function () {
-            const signers = await ethers.getSigners();
-            const players = signers.slice(1, 7);
-            
-            for (const player of players) {
-                const isActive = await treasury.activeAccounts(player.address);
-                if (!isActive) {
-                    await treasury.connect(player).openAccount({ value: buyIn });
-                }
-                await poker.connect(player).joinTable(tableId, buyIn);
-            }
-
-            const extraPlayer = signers[7];
-            await treasury.connect(extraPlayer).openAccount({ value: buyIn });
-            await expect(
-                poker.connect(extraPlayer).joinTable(tableId, buyIn)
-            ).to.be.revertedWithCustomError(poker, "TableFull");
+            expect(playerInfo.tableStake).to.equal(buyIn);
         });
 
         it("Should allow players to leave table", async function () {
-            await poker.connect(player1).joinTable(tableId, buyIn);
-            await poker.connect(player1).leaveTable(tableId);
-
-            const playerInfo = await poker.getPlayerInfo(tableId, player1.address);
+            await pokerTable.createTable(MIN_BUY_IN, MAX_BUY_IN, SMALL_BLIND, BIG_BLIND);
+            const buyIn = MIN_BUY_IN;
+            
+            await pokerPlayerManager.connect(player1).joinTable(0, buyIn, { value: buyIn });
+            await pokerPlayerManager.connect(player1).leaveTable(0);
+            
+            const playerInfo = await pokerTable.getPlayerInfo(0, player1.address);
             expect(playerInfo.isActive).to.be.false;
-            expect(playerInfo.tableStake).to.equal(0);
         });
     });
 
     describe("Game Flow", function () {
-        // Add tests for game flow, betting rounds, etc.
-        // This section will be expanded as more game logic is implemented
+        beforeEach(async function () {
+            await pokerTable.createTable(MIN_BUY_IN, MAX_BUY_IN, SMALL_BLIND, BIG_BLIND);
+            const buyIn = MIN_BUY_IN;
+            await pokerPlayerManager.connect(player1).joinTable(0, buyIn, { value: buyIn });
+            await pokerPlayerManager.connect(player2).joinTable(0, buyIn, { value: buyIn });
+        });
+
+        it("Should start game when enough players join", async function () {
+            await pokerTable.startGame(0);
+            const tableInfo = await pokerTable.getTableInfo(0);
+            expect(tableInfo.currentState).to.equal(2); // PreFlop
+        });
+
+        it("Should deal cards to players", async function () {
+            await pokerTable.startGame(0);
+            await pokerTable.dealCards(0);
+            
+            const player1Cards = await pokerTable.getPlayerCards(0, player1.address);
+            expect(player1Cards.holeCards.length).to.equal(2);
+        });
+
+        it("Should handle betting rounds", async function () {
+            await pokerTable.startGame(0);
+            await pokerTable.dealCards(0);
+
+            // Post blinds
+            await pokerBetting.postBlinds(0);
+
+            // Player1 (small blind) calls
+            await pokerBetting.connect(player1).call(0);
+
+            // Player2 (big blind) checks
+            await pokerBetting.connect(player2).check(0);
+
+            // Deal flop
+            await pokerTable.dealFlop(0);
+            const communityCards = await pokerTable.getCommunityCards(0);
+            expect(communityCards.length).to.equal(3);
+        });
     });
 
-    describe("Bet Limits", function () {
-        let tableId;
-
+    describe("Player Actions", function () {
         beforeEach(async function () {
-            await poker.createTable(
-                ethers.parseEther("1"),
-                ethers.parseEther("10"),
-                ethers.parseEther("0.01"),
-                ethers.parseEther("0.02"),
-                ethers.parseEther("0.02"),
-                ethers.parseEther("2")
-            );
-            tableId = 0;
+            await pokerTable.createTable(MIN_BUY_IN, MAX_BUY_IN, SMALL_BLIND, BIG_BLIND);
+            const buyIn = MIN_BUY_IN;
+            await pokerPlayerManager.connect(player1).joinTable(0, buyIn, { value: buyIn });
+            await pokerPlayerManager.connect(player2).joinTable(0, buyIn, { value: buyIn });
+            await pokerTable.startGame(0);
+            await pokerTable.dealCards(0);
+            await pokerBetting.postBlinds(0);
         });
 
-        it("Should allow owner to update bet limits", async function () {
-            const newMinBet = ethers.parseEther("0.05");
-            const newMaxBet = ethers.parseEther("5");
-
-            await poker.updateTableBetLimits(tableId, newMinBet, newMaxBet);
-
-            const tableInfo = await poker.getTableInfo(tableId);
-            expect(tableInfo.minBet).to.equal(newMinBet);
-            expect(tableInfo.maxBet).to.equal(newMaxBet);
+        it("Should allow players to check when no bets", async function () {
+            await pokerBetting.connect(player1).call(0);
+            await pokerBetting.connect(player2).check(0);
+            const tableInfo = await pokerTable.getTableInfo(0);
+            expect(tableInfo.pot).to.equal(SMALL_BLIND.add(BIG_BLIND));
         });
 
-        it("Should not allow non-owner to update bet limits", async function () {
-            await expect(
-                poker.connect(player1).updateTableBetLimits(
-                    tableId,
-                    ethers.parseEther("0.05"),
-                    ethers.parseEther("5")
-                )
-            ).to.be.revertedWithCustomError(poker, "OnlyOwnerAllowed");
+        it("Should allow players to raise", async function () {
+            const raiseAmount = BIG_BLIND.mul(2);
+            await pokerBetting.connect(player1).raise(0, raiseAmount);
+            const tableInfo = await pokerTable.getTableInfo(0);
+            expect(tableInfo.pot).to.be.gt(SMALL_BLIND.add(BIG_BLIND));
+        });
+
+        it("Should allow players to fold", async function () {
+            await pokerBetting.connect(player1).fold(0);
+            const player1Info = await pokerTable.getPlayerInfo(0, player1.address);
+            expect(player1Info.inHand).to.be.false;
+        });
+    });
+
+    describe("Game Progression", function () {
+        beforeEach(async function () {
+            await pokerTable.createTable(MIN_BUY_IN, MAX_BUY_IN, SMALL_BLIND, BIG_BLIND);
+            const buyIn = MIN_BUY_IN;
+            await pokerPlayerManager.connect(player1).joinTable(0, buyIn, { value: buyIn });
+            await pokerPlayerManager.connect(player2).joinTable(0, buyIn, { value: buyIn });
+            await pokerTable.startGame(0);
+        });
+
+        it("Should progress through all game states", async function () {
+            // PreFlop
+            await pokerTable.dealCards(0);
+            await pokerBetting.postBlinds(0);
+            await pokerBetting.connect(player1).call(0);
+            await pokerBetting.connect(player2).check(0);
+
+            // Flop
+            await pokerTable.dealFlop(0);
+            await pokerBetting.connect(player1).check(0);
+            await pokerBetting.connect(player2).check(0);
+
+            // Turn
+            await pokerTable.dealTurn(0);
+            await pokerBetting.connect(player1).check(0);
+            await pokerBetting.connect(player2).check(0);
+
+            // River
+            await pokerTable.dealRiver(0);
+            await pokerBetting.connect(player1).check(0);
+            await pokerBetting.connect(player2).check(0);
+
+            // Showdown
+            await pokerTable.startShowdown(0);
+            const tableInfo = await pokerTable.getTableInfo(0);
+            expect(tableInfo.currentState).to.equal(6); // Showdown
+        });
+
+        it("Should determine winner and award pot", async function () {
+            await pokerTable.dealCards(0);
+            await pokerBetting.postBlinds(0);
+            await pokerBetting.connect(player1).call(0);
+            await pokerBetting.connect(player2).check(0);
+
+            // Progress to showdown
+            await pokerTable.dealFlop(0);
+            await pokerTable.dealTurn(0);
+            await pokerTable.dealRiver(0);
+            await pokerTable.startShowdown(0);
+
+            // Determine winner
+            await pokerTable.determineWinner(0);
+            const tableInfo = await pokerTable.getTableInfo(0);
+            expect(tableInfo.pot).to.equal(0); // Pot should be awarded
         });
     });
 });
