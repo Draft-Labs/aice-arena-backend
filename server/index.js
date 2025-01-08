@@ -5,7 +5,11 @@ const { ethers } = require('ethers');
 const BlackjackJSON = require('../artifacts/contracts/Blackjack.sol/Blackjack.json');
 const RouletteJSON = require('../artifacts/contracts/Roulette.sol/Roulette.json');
 const TreasuryJSON = require('../artifacts/contracts/HouseTreasury.sol/HouseTreasury.json');
-const PokerJSON = require('../artifacts/contracts/Poker.sol/Poker.json');
+const PokerTableJSON = require('../artifacts/contracts/poker/PokerTable.sol/PokerTable.json');
+const PokerBettingJSON = require('../artifacts/contracts/poker/PokerBetting.sol/PokerBetting.json');
+const PokerPlayerManagerJSON = require('../artifacts/contracts/poker/PokerPlayerManager.sol/PokerPlayerManager.json');
+const PokerGameStateJSON = require('../artifacts/contracts/poker/PokerGameState.sol/PokerGameState.json');
+const PokerTreasuryJSON = require('../artifacts/contracts/poker/PokerTreasury.sol/PokerTreasury.json');
 
 const app = express();
 app.use(cors({
@@ -22,7 +26,11 @@ let houseSigner;
 let blackjackContract;
 let rouletteContract;
 let treasuryContract;
-let pokerContract;
+let pokerTableContract;
+let pokerBettingContract;
+let pokerPlayerManagerContract;
+let pokerGameStateContract;
+let pokerTreasuryContract;
 
 const EXPECTED_CHAIN_ID = 31337; // Hardhat's default chain ID
 
@@ -49,9 +57,29 @@ try {
     TreasuryJSON.abi,
     houseSigner
   );
-  pokerContract = new ethers.Contract(
-    process.env.POKER_ADDRESS,
-    PokerJSON.abi,
+  pokerTableContract = new ethers.Contract(
+    process.env.POKER_TABLE_ADDRESS,
+    PokerTableJSON.abi,
+    houseSigner
+  );
+  pokerBettingContract = new ethers.Contract(
+    process.env.POKER_BETTING_ADDRESS,
+    PokerBettingJSON.abi,
+    houseSigner
+  );
+  pokerPlayerManagerContract = new ethers.Contract(
+    process.env.POKER_PLAYER_MANAGER_ADDRESS,
+    PokerPlayerManagerJSON.abi,
+    houseSigner
+  );
+  pokerGameStateContract = new ethers.Contract(
+    process.env.POKER_GAME_STATE_ADDRESS,
+    PokerGameStateJSON.abi,
+    houseSigner
+  );
+  pokerTreasuryContract = new ethers.Contract(
+    process.env.POKER_TREASURY_ADDRESS,
+    PokerTreasuryJSON.abi,
     houseSigner
   );
 
@@ -116,9 +144,29 @@ async function ensureConnection() {
         TreasuryJSON.abi,
         houseSigner
       );
-      pokerContract = new ethers.Contract(
-        process.env.POKER_ADDRESS,
-        PokerJSON.abi,
+      pokerTableContract = new ethers.Contract(
+        process.env.POKER_TABLE_ADDRESS,
+        PokerTableJSON.abi,
+        houseSigner
+      );
+      pokerBettingContract = new ethers.Contract(
+        process.env.POKER_BETTING_ADDRESS,
+        PokerBettingJSON.abi,
+        houseSigner
+      );
+      pokerPlayerManagerContract = new ethers.Contract(
+        process.env.POKER_PLAYER_MANAGER_ADDRESS,
+        PokerPlayerManagerJSON.abi,
+        houseSigner
+      );
+      pokerGameStateContract = new ethers.Contract(
+        process.env.POKER_GAME_STATE_ADDRESS,
+        PokerGameStateJSON.abi,
+        houseSigner
+      );
+      pokerTreasuryContract = new ethers.Contract(
+        process.env.POKER_TREASURY_ADDRESS,
+        PokerTreasuryJSON.abi,
         houseSigner
       );
     }
@@ -502,11 +550,11 @@ app.post('/resolve-roulette-bet', async (req, res) => {
 // Add poker routes
 app.get('/poker/tables', async (req, res) => {
   try {
-    const maxTables = await pokerContract.maxTables();
+    const maxTables = await pokerTableContract.maxTables();
     const tables = [];
 
     for (let i = 0; i < maxTables; i++) {
-      const table = await pokerContract.tables(i);
+      const table = await pokerTableContract.tables(i);
       if (table.isActive) {
         tables.push({
           id: i,
@@ -541,7 +589,7 @@ app.post('/poker/create-table', async (req, res) => {
       bigBlind
     });
 
-    const tx = await pokerContract.createTable(
+    const tx = await pokerTableContract.createTable(
       ethers.parseEther(minBuyIn.toString()),
       ethers.parseEther(maxBuyIn.toString()),
       ethers.parseEther(smallBlind.toString()),
@@ -579,12 +627,12 @@ app.post('/poker/join-table', async (req, res) => {
     });
 
     // Verify player has sufficient funds in treasury
-    const playerBalance = await treasuryContract.getPlayerBalance(player);
+    const playerBalance = await pokerTreasuryContract.getPlayerBalance(player);
     if (playerBalance.lt(ethers.parseEther(buyIn.toString()))) {
       throw new Error('Insufficient funds in treasury');
     }
 
-    const tx = await pokerContract.joinTable(
+    const tx = await pokerPlayerManagerContract.joinTable(
       tableId,
       ethers.parseEther(buyIn.toString()),
       {
@@ -612,14 +660,14 @@ app.post('/poker/join-table', async (req, res) => {
 app.get('/poker/table/:tableId', async (req, res) => {
   try {
     const { tableId } = req.params;
-    const table = await pokerContract.tables(tableId);
+    const table = await pokerTableContract.tables(tableId);
     
     // Get all players at the table
     const players = [];
-    const activePlayers = await pokerContract.getTablePlayers(tableId);
+    const activePlayers = await pokerPlayerManagerContract.getTablePlayers(tableId);
     
     for (const playerAddress of activePlayers) {
-      const playerInfo = await pokerContract.getPlayerInfo(tableId, playerAddress);
+      const playerInfo = await pokerPlayerManagerContract.getPlayerInfo(tableId, playerAddress);
       players.push({
         address: playerAddress,
         tableStake: ethers.formatEther(playerInfo.tableStake),
@@ -668,16 +716,16 @@ app.post('/poker/action', async (req, res) => {
     let tx;
     switch (action) {
       case 'fold':
-        tx = await pokerContract.fold(tableId);
+        tx = await pokerBettingContract.fold(tableId);
         break;
       case 'check':
-        tx = await pokerContract.check(tableId);
+        tx = await pokerBettingContract.check(tableId);
         break;
       case 'call':
-        tx = await pokerContract.call(tableId);
+        tx = await pokerBettingContract.call(tableId);
         break;
       case 'raise':
-        tx = await pokerContract.raise(tableId, ethers.parseEther(amount));
+        tx = await pokerBettingContract.raise(tableId, ethers.parseEther(amount));
         break;
       default:
         throw new Error('Invalid action');
@@ -687,8 +735,8 @@ app.post('/poker/action', async (req, res) => {
     console.log('Action processed:', receipt.hash);
 
     // Get updated table state
-    const tableInfo = await pokerContract.getTableInfo(tableId);
-    const playerInfo = await pokerContract.getPlayerInfo(tableId, player);
+    const tableInfo = await pokerTableContract.getTableInfo(tableId);
+    const playerInfo = await pokerPlayerManagerContract.getPlayerInfo(tableId, player);
 
     res.json({
       success: true,
@@ -725,10 +773,10 @@ app.post('/poker/dealer-action', async (req, res) => {
     // First change game state
     switch (action) {
       case 'startFlop':
-        tx = await pokerContract.startFlop(tableId);
+        tx = await pokerGameStateContract.startFlop(tableId);
         // Deal 3 flop cards after state change
         await tx.wait();
-        cardsTx = await pokerContract.dealCommunityCards(
+        cardsTx = await pokerTableContract.dealCommunityCards(
           tableId, 
           [
             Math.floor(Math.random() * 52) + 1,
@@ -738,25 +786,25 @@ app.post('/poker/dealer-action', async (req, res) => {
         );
         break;
       case 'startTurn':
-        tx = await pokerContract.startTurn(tableId);
+        tx = await pokerGameStateContract.startTurn(tableId);
         // Deal 1 turn card after state change
         await tx.wait();
-        cardsTx = await pokerContract.dealCommunityCards(
+        cardsTx = await pokerTableContract.dealCommunityCards(
           tableId, 
           [Math.floor(Math.random() * 52) + 1]
         );
         break;
       case 'startRiver':
-        tx = await pokerContract.startRiver(tableId);
+        tx = await pokerGameStateContract.startRiver(tableId);
         // Deal 1 river card after state change
         await tx.wait();
-        cardsTx = await pokerContract.dealCommunityCards(
+        cardsTx = await pokerTableContract.dealCommunityCards(
           tableId, 
           [Math.floor(Math.random() * 52) + 1]
         );
         break;
       case 'startShowdown':
-        tx = await pokerContract.startShowdown(tableId);
+        tx = await pokerGameStateContract.startShowdown(tableId);
         break;
       default:
         throw new Error('Invalid dealer action');
@@ -766,8 +814,8 @@ app.post('/poker/dealer-action', async (req, res) => {
     if (cardsTx) await cardsTx.wait();
 
     // Get updated table state
-    const tableInfo = await pokerContract.getTableInfo(tableId);
-    const communityCards = await pokerContract.getCommunityCards(tableId);
+    const tableInfo = await pokerTableContract.getTableInfo(tableId);
+    const communityCards = await pokerTableContract.getCommunityCards(tableId);
 
     res.json({
       success: true,
@@ -791,13 +839,13 @@ app.post('/poker/deal-initial-cards', async (req, res) => {
     const { tableId } = req.body;
     
     // Get all players at the table
-    const players = await pokerContract.getTablePlayers(tableId);
+    const players = await pokerPlayerManagerContract.getTablePlayers(tableId);
     
     // Deal 2 cards to each active player
     for (const player of players) {
-      const playerInfo = await pokerContract.getPlayerInfo(tableId, player);
+      const playerInfo = await pokerPlayerManagerContract.getPlayerInfo(tableId, player);
       if (playerInfo.isActive) {
-        await pokerContract.dealPlayerCards(
+        await pokerTableContract.dealPlayerCards(
           tableId,
           player,
           [
@@ -845,7 +893,7 @@ app.post('/poker/deal-player-cards', async (req, res) => {
       cards
     });
 
-    const tx = await pokerContract.dealPlayerCards(tableId, player, cards);
+    const tx = await pokerTableContract.dealPlayerCards(tableId, player, cards);
     const receipt = await tx.wait();
 
     res.json({
@@ -883,7 +931,7 @@ app.post('/poker/deal-community-cards', async (req, res) => {
       cards
     });
 
-    const tx = await pokerContract.dealCommunityCards(tableId, cards);
+    const tx = await pokerTableContract.dealCommunityCards(tableId, cards);
     const receipt = await tx.wait();
 
     res.json({
@@ -905,7 +953,7 @@ app.post('/poker/deal-community-cards', async (req, res) => {
 app.get('/poker/player-cards/:tableId/:player', async (req, res) => {
   try {
     const { tableId, player } = req.params;
-    const cards = await pokerContract.getPlayerCards(tableId, player);
+    const cards = await pokerTableContract.getPlayerCards(tableId, player);
     
     res.json({
       success: true,
@@ -923,7 +971,7 @@ app.get('/poker/player-cards/:tableId/:player', async (req, res) => {
 app.get('/poker/community-cards/:tableId', async (req, res) => {
   try {
     const { tableId } = req.params;
-    const cards = await pokerContract.getCommunityCards(tableId);
+    const cards = await pokerTableContract.getCommunityCards(tableId);
     
     res.json({
       success: true,
