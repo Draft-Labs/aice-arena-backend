@@ -141,7 +141,7 @@ contract PokerBetting is Ownable, ReentrancyGuard {
         ) = pokerTable.getTableInfo(tableId);
 
         // Get player info
-        (uint256 tableStake, uint256 currentBet, bool isActive,, bool inHand) = pokerTable.getPlayerInfo(tableId, msg.sender);
+        (, uint256 currentBet, bool isActive,, bool inHand) = pokerTable.getPlayerInfo(tableId, msg.sender);
 
         // Validate check
         if (!isActive || !inHand) revert NotYourTurn();
@@ -198,7 +198,7 @@ contract PokerBetting is Ownable, ReentrancyGuard {
         ) = pokerTable.getTableInfo(tableId);
 
         // Get player info
-        (uint256 tableStake, uint256 currentBet, bool isActive,, bool inHand) = pokerTable.getPlayerInfo(tableId, msg.sender);
+        (uint256 tableStake,, bool isActive,, bool inHand) = pokerTable.getPlayerInfo(tableId, msg.sender);
 
         // Validate raise
         if (!isActive || !inHand) revert NotYourTurn();
