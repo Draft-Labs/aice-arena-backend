@@ -960,7 +960,7 @@ app.post('/poker/add-house', async (req, res) => {
     
     // Get table info to determine buy-in amount
     const tableInfo = await pokerContract.getTableInfo(tableId);
-    const maxBuyIn = tableInfo[0]; // maxBuyIn is the first return value
+    const maxBuyIn = tableInfo[1]; // maxBuyIn is the first return value
     
     console.log('House joining table:', {
       tableId,
@@ -1104,7 +1104,7 @@ const monitorHousePlay = async (tableId) => {
       
       let tx;
       
-      if (handStrength >= 0.7) { // Strong hand
+      if (handStrength >= 0.5) { // Strong hand
         // Raise 2x the current bet
         const raiseAmount = currentBet * 2n;
         if (tableStake >= raiseAmount) {
