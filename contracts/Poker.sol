@@ -1065,7 +1065,7 @@ contract Poker is Ownable, ReentrancyGuard {
         Player storage player = table.players[msg.sender];
         
         require(table.currentPosition == player.position, "Not your turn");
-        require(amount > table.currentBet * 2, "Raise must be at least double current bet");
+        //require(amount > table.currentBet * 2, "Raise must be at least double current bet");
         require(amount <= player.tableStake, "Insufficient funds");
         require(amount >= table.minBet && amount <= table.maxBet, "Invalid bet amount");
         

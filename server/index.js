@@ -953,6 +953,258 @@ function getCardDetails(cardNumber) {
   };
 }
 
+// Add house player endpoints
+app.post('/poker/add-house', async (req, res) => {
+  try {
+    const { tableId } = req.body;
+    
+    // Get table info to determine buy-in amount
+    const tableInfo = await pokerContract.getTableInfo(tableId);
+    const maxBuyIn = tableInfo[0]; // maxBuyIn is the first return value
+    
+    console.log('House joining table:', {
+      tableId,
+      maxBuyIn: ethers.formatEther(maxBuyIn)
+    });
+
+    // Check if house is already at the table
+    const houseAddress = await houseSigner.getAddress();
+    const playerInfo = await pokerContract.getPlayerInfo(tableId, houseAddress);
+    if (playerInfo[2]) { // isActive is the third return value
+      throw new Error('House is already at this table');
+    }
+
+    // First ensure house has enough balance in treasury
+    const treasuryBalance = await treasuryContract.getPlayerBalance(houseAddress);
+    console.log('Treasury balance check:', {
+      balance: ethers.formatEther(treasuryBalance),
+      required: ethers.formatEther(maxBuyIn)
+    });
+
+    // Convert to BigNumber for comparison
+    if (treasuryBalance < maxBuyIn) {
+      // Add funds to treasury if needed
+      const fundAmount = maxBuyIn - treasuryBalance;
+      console.log('Depositing to treasury:', ethers.formatEther(fundAmount));
+      
+      const depositTx = await treasuryContract.connect(houseSigner).deposit({ 
+        value: fundAmount,
+        gasLimit: 500000
+      });
+      await depositTx.wait();
+      console.log('Deposit complete');
+    }
+
+    // Join table with maximum buy-in
+    console.log('Joining table with:', ethers.formatEther(maxBuyIn));
+    const tx = await pokerContract.connect(houseSigner).joinTable(
+      tableId,
+      maxBuyIn,
+      {
+        gasLimit: 500000
+      }
+    );
+
+    const receipt = await tx.wait();
+    console.log('House joined table:', receipt.hash);
+
+    // Start monitoring this table for house's turn
+    monitorHousePlay(tableId);
+
+    res.json({
+      success: true,
+      txHash: receipt.hash,
+      houseAddress
+    });
+
+  } catch (error) {
+    console.error('Error adding house to table:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Update the monitorHousePlay function to handle errors better
+const monitorHousePlay = async (tableId) => {
+  // Check if monitoring is already active for this table
+  if (houseMonitors.has(tableId)) {
+    console.log('Monitor already exists for table:', tableId);
+    return;
+  }
+  
+  console.log('Starting house monitor for table:', tableId);
+  
+  const monitor = setInterval(async () => {
+    try {
+      // Get table info with proper destructuring
+      const [
+        minBuyIn,
+        maxBuyIn,
+        smallBlind,
+        bigBlind,
+        minBet,
+        maxBet,
+        pot,
+        playerCount,
+        gameState,
+        isActive
+      ] = await pokerContract.getTableInfo(tableId);
+
+      // Get current position from the contract directly
+      const currentPosition = await pokerContract.tables(tableId).then(table => table.currentPosition);
+      
+      const houseAddress = await houseSigner.getAddress();
+      
+      // Get all players at the table
+      const players = await pokerContract.getTablePlayers(tableId);
+      
+      // Debug logging
+      console.log('Table state:', {
+        tableId,
+        currentPosition: currentPosition.toString(),
+        gameState: gameState.toString(),
+        players,
+        houseAddress
+      });
+      
+      // Check if it's house's turn
+      if (!players[currentPosition] || 
+          players[currentPosition].toLowerCase() !== houseAddress.toLowerCase()) {
+        return; // Not house's turn
+      }
+
+      console.log('House turn detected:', {
+        tableId,
+        currentPosition: currentPosition.toString(),
+        gameState: gameState.toString()
+      });
+
+      // Get game state info
+      const [tableStake, currentBet, isPlayerActive, isSittingOut, position] = 
+        await pokerContract.getPlayerInfo(tableId, houseAddress);
+      
+      const houseCards = await pokerContract.getPlayerCards(tableId, houseAddress);
+      const communityCards = await pokerContract.getCommunityCards(tableId);
+
+      // Simple house strategy based on hand strength
+      const handStrength = evaluateHouseHand(
+        houseCards.map(c => Number(c)), 
+        communityCards.map(c => Number(c))
+      );
+      
+      console.log('House hand evaluation:', {
+        handStrength,
+        houseCards: houseCards.map(c => Number(c)),
+        communityCards: communityCards.map(c => Number(c)),
+        tableStake: ethers.formatEther(tableStake),
+        currentBet: ethers.formatEther(currentBet)
+      });
+      
+      let tx;
+      
+      if (handStrength >= 0.7) { // Strong hand
+        // Raise 2x the current bet
+        const raiseAmount = currentBet * 2n;
+        if (tableStake >= raiseAmount) {
+          console.log('House raising:', ethers.formatEther(raiseAmount));
+          tx = await pokerContract.connect(houseSigner).raise(tableId, raiseAmount, {
+            gasLimit: 500000
+          });
+        } else {
+          console.log('House calling (insufficient funds to raise)');
+          tx = await pokerContract.connect(houseSigner).call(tableId, {
+            gasLimit: 500000
+          });
+        }
+      } else if (handStrength >= 0.1) { // Medium hand
+        // Call or check
+        if (currentBet > 0n) {
+          console.log('House calling');
+          tx = await pokerContract.connect(houseSigner).call(tableId, {
+            gasLimit: 500000
+          });
+        } else {
+          console.log('House checking');
+          tx = await pokerContract.connect(houseSigner).check(tableId, {
+            gasLimit: 500000
+          });
+        }
+      } else { // Weak hand
+        // Fold if there's a bet, check if possible
+        if (currentBet > 0n) {
+          console.log('House folding');
+          tx = await pokerContract.connect(houseSigner).fold(tableId, {
+            gasLimit: 500000
+          });
+        } else {
+          console.log('House checking (weak hand)');
+          tx = await pokerContract.connect(houseSigner).check(tableId, {
+            gasLimit: 500000
+          });
+        }
+      }
+
+      const receipt = await tx.wait();
+      console.log('House played action:', receipt.hash);
+
+    } catch (error) {
+      console.error('Error in house play monitoring:', error);
+      
+      // If the table is no longer active or house is not in the game, stop monitoring
+      if (error.message.includes('Table not active') || 
+          error.message.includes('Player not at table')) {
+        console.log('Stopping monitor for table:', tableId);
+        clearInterval(monitor);
+        houseMonitors.delete(tableId);
+      }
+    }
+  }, 3000); // Check every 3 seconds
+
+  houseMonitors.set(tableId, monitor);
+};
+
+// Simple hand strength evaluation (0-1 scale)
+const evaluateHouseHand = (houseCards, communityCards) => {
+  try {
+    // Convert card numbers to values and suits
+    const allCards = [...houseCards, ...communityCards].map(card => ({
+      value: ((card - 1) % 13) + 1,
+      suit: Math.floor((card - 1) / 13)
+    }));
+
+    // Count pairs, three of a kind, etc.
+    const valueCounts = {};
+    allCards.forEach(card => {
+      valueCounts[card.value] = (valueCounts[card.value] || 0) + 1;
+    });
+
+    // Check for pairs, three of a kind, etc.
+    const pairs = Object.values(valueCounts).filter(count => count === 2).length;
+    const threeOfKind = Object.values(valueCounts).some(count => count === 3);
+    const fourOfKind = Object.values(valueCounts).some(count => count === 4);
+
+    // Simple scoring system
+    if (fourOfKind) return 1.0;
+    if (threeOfKind && pairs > 0) return 0.9;
+    if (threeOfKind) return 0.7;
+    if (pairs === 2) return 0.6;
+    if (pairs === 1) return 0.4;
+    
+    // High card - scale based on highest card
+    const highestCard = Math.max(...allCards.map(card => card.value));
+    return 0.2 + (highestCard / 13) * 0.2;
+
+  } catch (error) {
+    console.error('Error evaluating house hand:', error);
+    return 0.5; // Default to medium strength on error
+  }
+};
+
+// Keep track of active house monitors
+const houseMonitors = new Map();
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
