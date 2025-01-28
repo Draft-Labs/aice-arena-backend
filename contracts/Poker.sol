@@ -1065,14 +1065,16 @@ contract Poker is Ownable, ReentrancyGuard {
         Player storage player = table.players[msg.sender];
         
         require(table.currentPosition == player.position, "Not your turn");
-        //require(amount > table.currentBet * 2, "Raise must be at least double current bet");
         require(amount <= player.tableStake, "Insufficient funds");
         require(amount >= table.minBet && amount <= table.maxBet, "Invalid bet amount");
         
-        player.tableStake -= amount;
+        // Calculate the actual amount being added to the pot
+        uint256 additionalBet = amount - player.currentBet;
+        
+        player.tableStake -= additionalBet;
         player.currentBet = amount;
         table.currentBet = amount;
-        table.pot += amount;
+        table.pot += additionalBet;  // Only add the difference to the pot
         table.hasActed[player.position] = true;
         
         // Reset hasActed for all other players since they need to respond to raise
@@ -1082,7 +1084,7 @@ contract Poker is Ownable, ReentrancyGuard {
             }
         }
         
-        emit BetPlaced(tableId, msg.sender, amount);
+        emit BetPlaced(tableId, msg.sender, additionalBet);
         emit TurnEnded(tableId, msg.sender, "raise");
         
         moveToNextPlayer(tableId);
