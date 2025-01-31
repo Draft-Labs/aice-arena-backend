@@ -55,10 +55,10 @@ try {
     houseSigner
   );
 
-  // Verify contract ownership
-  const verifyOwnership = async () => {
+  // Verify contract ownership and authorize games
+  const initializeContracts = async () => {
     try {
-      const owner = await blackjackContract.owner();
+      const owner = await treasuryContract.owner();
       const houseSigner_address = await houseSigner.getAddress();
       
       console.log('Contract ownership verification:', {
@@ -70,13 +70,46 @@ try {
       if (owner.toLowerCase() !== houseSigner_address.toLowerCase()) {
         throw new Error('House signer is not the contract owner');
       }
+
+      // Authorize game contracts in Treasury
+      const rouletteAddress = await rouletteContract.getAddress();
+      const blackjackAddress = await blackjackContract.getAddress();
+      const pokerAddress = await pokerContract.getAddress();
+
+      // Check if games are already authorized
+      const isRouletteAuthorized = await treasuryContract.authorizedGames(rouletteAddress);
+      const isBlackjackAuthorized = await treasuryContract.authorizedGames(blackjackAddress);
+      const isPokerAuthorized = await treasuryContract.authorizedGames(pokerAddress);
+
+      // Authorize games if needed
+      if (!isRouletteAuthorized) {
+        console.log('Authorizing Roulette contract...');
+        const tx = await treasuryContract.authorizeGame(rouletteAddress);
+        await tx.wait();
+        console.log('Roulette contract authorized');
+      }
+
+      if (!isBlackjackAuthorized) {
+        console.log('Authorizing Blackjack contract...');
+        const tx = await treasuryContract.authorizeGame(blackjackAddress);
+        await tx.wait();
+        console.log('Blackjack contract authorized');
+      }
+
+      if (!isPokerAuthorized) {
+        console.log('Authorizing Poker contract...');
+        const tx = await treasuryContract.authorizeGame(pokerAddress);
+        await tx.wait();
+        console.log('Poker contract authorized');
+      }
+
     } catch (error) {
-      console.error('Error verifying contract ownership:', error);
+      console.error('Error initializing contracts:', error);
       throw error;
     }
   };
 
-  verifyOwnership();
+  initializeContracts();
 
   // Test connection immediately
   provider.getNetwork().then(network => {
@@ -408,13 +441,13 @@ app.post('/submit-game', async (req, res) => {
 // Add new endpoints for roulette
 app.post('/submit-roulette-bet', async (req, res) => {
   try {
-    const { player, betAmount, betType, numbers, nonce } = req.body;
+    const { player, betAmount, numbers, betType, nonce } = req.body;
 
     console.log('Received roulette bet:', {
       player,
       betAmount,
-      betType,
       numbers,
+      betType,
       nonce
     });
 
@@ -431,16 +464,24 @@ app.post('/submit-roulette-bet', async (req, res) => {
       throw new Error('Insufficient balance');
     }
 
-    // Process the bet through the treasury first
-    await treasuryContract.processBetLoss(player, betAmountWei);
+    // Calculate dynamic gas limit based on number of bets
+    const baseGas = 200000;  // Increased base gas
+    const gasPerNumber = 75000;  // Increased gas per number
+    const gasLimit = baseGas + (numbers.length * gasPerNumber);
 
-    // Then place the bet in the roulette contract
-    const tx = await rouletteContract.placeBet(
-      betType,
+    console.log('Gas calculation:', {
+      baseGas,
+      gasPerNumber,
+      numbersLength: numbers.length,
+      totalGasLimit: gasLimit
+    });
+
+    // Place the bet through the Roulette contract using house signer
+    const tx = await rouletteContract.connect(houseSigner).placeBet(
       numbers,
-      betAmountWei,
-      {
-        gasLimit: 500000
+      { 
+        value: betAmountWei,
+        gasLimit: gasLimit
       }
     );
     
@@ -448,10 +489,13 @@ app.post('/submit-roulette-bet', async (req, res) => {
     const receipt = await tx.wait();
     console.log('Transaction confirmed:', receipt);
 
+    // Get updated balance after bet
+    const newBalance = await treasuryContract.getPlayerBalance(player);
+
     res.json({ 
       success: true, 
       txHash: tx.hash,
-      balance: ethers.formatEther(await treasuryContract.getPlayerBalance(player))
+      balance: ethers.formatEther(newBalance)
     });
   } catch (error) {
     console.error('Error in submit-roulette-bet:', error);
