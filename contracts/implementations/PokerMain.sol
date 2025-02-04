@@ -4,29 +4,34 @@ pragma solidity ^0.8.20;
 import "./PokerGame.sol";
 import "./PokerTable.sol";
 import "./PokerHand.sol";
-import "../HouseTreasury.sol";
+import "./PokerTreasury.sol";
 
 contract PokerMain is PokerGame, PokerTable {
-    HouseTreasury public treasury;
+    PokerTreasury public immutable treasury;
 
     constructor(
         address storageAddress,
         address treasuryAddress,
         address pokerHandAddress
     ) PokerGame(storageAddress, pokerHandAddress) {
-        treasury = HouseTreasury(treasuryAddress);
+        treasury = PokerTreasury(treasuryAddress);
     }
 
     // Override table functions to handle treasury integration
     function joinTable(uint256 tableId, uint256 buyInAmount) external override {
+        // Validate buy-in amount
+        PokerStorage.TableConfig memory config = storage_.getTableConfig(tableId);
+        require(buyInAmount >= config.minBuyIn && buyInAmount <= config.maxBuyIn, "Invalid buy-in amount");
+        
         // Check if player has sufficient balance in treasury
         require(
-            treasury.getPlayerBalance(msg.sender) >= buyInAmount,
+            treasury.getBalance(msg.sender) >= buyInAmount,
             "Insufficient balance in treasury"
         );
 
         // Transfer buy-in from player's treasury balance
-        treasury.processBetLoss(msg.sender, buyInAmount);
+        balances[msg.sender] = balances[msg.sender].sub(buyInAmount);
+        totalFunds = totalFunds.sub(buyInAmount);
 
         // Call parent implementation
         super.joinTable(tableId, buyInAmount);
@@ -41,55 +46,12 @@ contract PokerMain is PokerGame, PokerTable {
 
         // Return remaining stake to treasury
         if (remainingStake > 0) {
-            treasury.processBetWin(msg.sender, remainingStake);
+            balances[msg.sender] = balances[msg.sender].add(remainingStake);
+            totalFunds = totalFunds.add(remainingStake);
         }
     }
 
     // Override game functions to handle treasury integration
-    function postBlinds(uint256 tableId) external onlyOwner {
-        PokerStorage.TableConfig memory config = storage_.getTableConfig(tableId);
-        require(config.gameState == PokerStorage.GameState.PreFlop, "Not in PreFlop state");
-        
-        uint8 smallBlindPos = uint8((config.dealerPosition + 1) % config.playerCount);
-        uint8 bigBlindPos = uint8((config.dealerPosition + 2) % config.playerCount);
-        
-        address smallBlindPlayer = storage_.getPlayerAtPosition(tableId, smallBlindPos);
-        address bigBlindPlayer = storage_.getPlayerAtPosition(tableId, bigBlindPos);
-        
-        PokerStorage.PackedPlayer memory smallBlind = storage_.getPlayer(tableId, smallBlindPlayer);
-        PokerStorage.PackedPlayer memory bigBlind = storage_.getPlayer(tableId, bigBlindPlayer);
-        
-        uint256 smallBlindAmount = config.minBet / 2;
-        uint256 bigBlindAmount = config.minBet;
-        
-        require(smallBlind.tableStake >= smallBlindAmount, "Small blind insufficient funds");
-        require(bigBlind.tableStake >= bigBlindAmount, "Big blind insufficient funds");
-        
-        // Post small blind
-        smallBlind.tableStake -= uint40(smallBlindAmount);
-        smallBlind.currentBet = uint40(smallBlindAmount);
-        config.pot += uint40(smallBlindAmount);
-        
-        // Post big blind
-        bigBlind.tableStake -= uint40(bigBlindAmount);
-        bigBlind.currentBet = uint40(bigBlindAmount);
-        config.pot += uint40(bigBlindAmount);
-        config.currentBet = uint40(bigBlindAmount);
-        
-        storage_.setPlayer(tableId, smallBlindPlayer, smallBlind);
-        storage_.setPlayer(tableId, bigBlindPlayer, bigBlind);
-        storage_.setTableConfig(tableId, config);
-        
-        // Emit optimized blinds posted event
-        emit BlindsPosted(
-            tableId,
-            smallBlindPlayer,
-            bigBlindPlayer,
-            uint40(smallBlindAmount),
-            uint40(bigBlindAmount)
-        );
-    }
-
     function startShowdown(uint256 tableId) external override onlyOwner onlyValidTable(tableId) {
         PokerStorage.TableConfig memory config = storage_.getTableConfig(tableId);
         require(config.gameState == PokerStorage.GameState.River, "Not in River state");
@@ -108,15 +70,13 @@ contract PokerMain is PokerGame, PokerTable {
         
         (address winner, HandRank winningRank, uint256 winningScore) = pokerHand.determineWinner(tableId);
         
-        // Transfer pot to treasury
-        uint256 fee = (config.pot * treasuryFee) / 10000;
-        uint256 winnings = config.pot - fee;
-        treasury.transfer(fee);
+        // Calculate and collect house fee
+        uint256 fee = treasury.collectHouseFee(config.pot);
+        uint256 winnings = config.pot.sub(fee);
         
-        // Award winnings to winner
-        PokerStorage.PackedPlayer memory winningPlayer = storage_.getPlayer(tableId, winner);
-        winningPlayer.tableStake += uint40(winnings);
-        storage_.setPlayer(tableId, winner, winningPlayer);
+        // Award winnings to winner through treasury
+        balances[winner] = balances[winner].add(winnings);
+        totalFunds = totalFunds.add(winnings);
         
         // Emit optimized game result event
         emit GameResult(
@@ -132,6 +92,33 @@ contract PokerMain is PokerGame, PokerTable {
         storage_.setTableConfig(tableId, config);
     }
 
+    // Treasury integration functions
+    function deposit() external payable {
+        treasury.deposit{value: msg.value}();
+    }
+
+    function requestWithdrawal(uint256 amount) external {
+        treasury.requestWithdrawal(amount);
+    }
+
+    function getPlayerBalance() external view returns (uint256) {
+        return treasury.getBalance(msg.sender);
+    }
+
+    // Emergency functions
+    function emergencyWithdraw() external whenPaused {
+        uint256 tableId = storage_.getPlayerTableId(msg.sender);
+        if (tableId != 0) {
+            super.emergencyWithdraw(tableId, msg.sender);
+        }
+        treasury.emergencyWithdraw(msg.sender);
+    }
+
+    // Receive function to handle incoming funds
+    receive() external payable {
+        deposit();
+    }
+
     // Helper function to get active player count
     function getActivePlayerCount(uint256 tableId) internal view returns (uint256 count) {
         address[] memory tablePlayers = storage_.getTablePlayers(tableId);
@@ -141,15 +128,5 @@ contract PokerMain is PokerGame, PokerTable {
             }
         }
         return count;
-    }
-
-    // Add function to get player's treasury balance
-    function getPlayerBalance(address player) external view returns (uint256) {
-        return treasury.getPlayerBalance(player);
-    }
-
-    // Add function to check if player has active treasury account
-    function hasActiveTreasuryAccount(address player) external view returns (bool) {
-        return treasury.activeAccounts(player);
     }
 } 
