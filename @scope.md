@@ -70,6 +70,10 @@
    - Test edge cases and failure modes
    - Add integration tests
 
+4.2. **Hardhat Local Testing**
+   - Deploy to hardhat local network
+   - Connect to frontend
+   
 4.2. **Documentation**
    - Add detailed code comments
    - Create technical documentation
