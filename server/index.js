@@ -709,6 +709,17 @@ app.post('/poker/action', async (req, res) => {
       amount
     });
 
+    // Get initial state to calculate next turn
+    const [initialPlayers, initialTable] = await Promise.all([
+      pokerContract.getTablePlayers(tableId),
+      pokerContract.tables(tableId)
+    ]);
+
+    // Calculate expected next turn
+    const currentPos = Number(initialTable.currentPosition);
+    const nextPosition = (currentPos + 1) % initialPlayers.length;
+    const expectedNextPlayer = initialPlayers[nextPosition];
+
     let tx;
     switch (action) {
       case 'fold':
@@ -727,13 +738,25 @@ app.post('/poker/action', async (req, res) => {
         throw new Error('Invalid action');
     }
 
+    // Wait for transaction to be mined
     const receipt = await tx.wait();
     console.log('Action processed:', receipt.hash);
 
-    // Get updated table state
-    const tableInfo = await pokerContract.getTableInfo(tableId);
+    // Get updated table state immediately after action
+    const [tableInfo, players, confirmedTable] = await Promise.all([
+      pokerContract.getTableInfo(tableId),
+      pokerContract.getTablePlayers(tableId),
+      pokerContract.tables(tableId)
+    ]);
+
+    // Get the confirmed current position and player
+    const confirmedPosition = Number(confirmedTable.currentPosition);
+    const currentPlayer = players[confirmedPosition];
+    
+    // Get current player's info
     const playerInfo = await pokerContract.getPlayerInfo(tableId, player);
 
+    // Send back comprehensive state update
     res.json({
       success: true,
       txHash: receipt.hash,
@@ -741,7 +764,10 @@ app.post('/poker/action', async (req, res) => {
         gameState: tableInfo.gameState,
         pot: ethers.formatEther(tableInfo.pot),
         currentBet: ethers.formatEther(playerInfo.currentBet),
-        isPlayerTurn: playerInfo.isActive && !playerInfo.isSittingOut
+        isPlayerTurn: playerInfo.isActive && !playerInfo.isSittingOut,
+        currentTurn: currentPlayer,
+        currentPosition: confirmedPosition,
+        expectedNextPlayer: expectedNextPlayer
       }
     });
 
@@ -1124,6 +1150,11 @@ const monitorHousePlay = async (tableId) => {
         currentPosition: currentPosition.toString(),
         gameState: gameState.toString()
       });
+
+      // Add a 5-second delay before making a move
+      console.log('Waiting 5 seconds before making house move...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      console.log('Delay complete, proceeding with house move');
 
       // Get game state info
       const [tableStake, currentBet, isPlayerActive, isSittingOut, position] = 
