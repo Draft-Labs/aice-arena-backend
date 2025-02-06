@@ -1,120 +1,131 @@
 const hre = require("hardhat");
 
 async function main() {
-  // Configure the provider to connect to the hosted network
-  const provider = new hre.ethers.JsonRpcProvider("http://0.0.0.0:8545");
-  
+  console.log("Starting deployment to Avalanche Fuji Testnet...");
+
   // Get the deployer's signer
   const [deployer] = await hre.ethers.getSigners();
-  console.log("Deploying contracts with account:", await deployer.getAddress());
+  const deployerAddress = await deployer.getAddress();
+  const deployerBalance = await deployer.provider.getBalance(deployerAddress);
 
-  // Deploy Treasury
-  const HouseTreasury = await hre.ethers.getContractFactory("HouseTreasury");
-  const treasury = await HouseTreasury.deploy();
-  await treasury.waitForDeployment();
-  console.log("Treasury deployed to:", await treasury.getAddress());
+  console.log("Deploying contracts with account:", deployerAddress);
+  console.log("Account balance:", hre.ethers.formatEther(deployerBalance), "AVAX");
 
-  // Deploy Games
-  const minBetAmount = hre.ethers.parseEther("0.01");
-  const treasuryAddress = await treasury.getAddress();
+  try {
+    // Deploy Treasury
+    console.log("\nDeploying Treasury...");
+    const HouseTreasury = await hre.ethers.getContractFactory("HouseTreasury");
+    const treasury = await HouseTreasury.deploy();
+    await treasury.waitForDeployment();
+    console.log("Treasury deployed to:", await treasury.getAddress());
 
-  const Blackjack = await hre.ethers.getContractFactory("Blackjack");
-  const blackjack = await Blackjack.deploy(minBetAmount, treasuryAddress);
-  await blackjack.waitForDeployment();
-  console.log("Blackjack deployed to:", await blackjack.getAddress());
+    // Deploy Games
+    const minBetAmount = hre.ethers.parseEther("0.1"); // 0.1 AVAX minimum bet
+    const treasuryAddress = await treasury.getAddress();
 
-  const Roulette = await hre.ethers.getContractFactory("Roulette");
-  const roulette = await Roulette.deploy(minBetAmount, treasuryAddress);
-  await roulette.waitForDeployment();
-  console.log("Roulette deployed to:", await roulette.getAddress());
+    console.log("\nDeploying Blackjack...");
+    const Blackjack = await hre.ethers.getContractFactory("Blackjack");
+    const blackjack = await Blackjack.deploy(minBetAmount, treasuryAddress);
+    await blackjack.waitForDeployment();
+    console.log("Blackjack deployed to:", await blackjack.getAddress());
 
-  // Deploy Poker
-  const Poker = await hre.ethers.getContractFactory("Poker");
-  const poker = await Poker.deploy(minBetAmount, treasuryAddress);
-  await poker.waitForDeployment();
-  console.log("Poker deployed to:", await poker.getAddress());
+    console.log("\nDeploying Roulette...");
+    const Roulette = await hre.ethers.getContractFactory("Roulette");
+    const roulette = await Roulette.deploy(minBetAmount, treasuryAddress);
+    await roulette.waitForDeployment();
+    console.log("Roulette deployed to:", await roulette.getAddress());
 
-  // Authorize games in treasury
-  console.log("Authorizing games in treasury...");
-  
-  // Check and authorize Blackjack
-  const blackjackAuthorized = await treasury.authorizedGames(await blackjack.getAddress());
-  if (!blackjackAuthorized) {
+    console.log("\nDeploying Poker...");
+    const Poker = await hre.ethers.getContractFactory("Poker");
+    const poker = await Poker.deploy(minBetAmount, treasuryAddress);
+    await poker.waitForDeployment();
+    console.log("Poker deployed to:", await poker.getAddress());
+
+    // Authorize games in treasury with error handling
+    console.log("\nAuthorizing games in treasury...");
+    
+    const authorizeGame = async (game, gameName) => {
+      const gameAddress = await game.getAddress();
+      const isAuthorized = await treasury.authorizedGames(gameAddress);
+      
+      if (!isAuthorized) {
+        try {
+          const tx = await treasury.authorizeGame(gameAddress);
+          await tx.wait();
+          console.log(`${gameName} authorized in treasury`);
+        } catch (error) {
+          console.error(`Error authorizing ${gameName}:`, error.message);
+          throw error;
+        }
+      } else {
+        console.log(`${gameName} already authorized`);
+      }
+    };
+
+    await authorizeGame(blackjack, "Blackjack");
+    await authorizeGame(roulette, "Roulette");
+    await authorizeGame(poker, "Poker");
+
+    // Fund treasury
+    console.log("\nFunding treasury...");
     try {
-      const blackjackTx = await treasury.authorizeGame(await blackjack.getAddress());
-      await blackjackTx.wait();
-      console.log("Blackjack authorized in treasury");
+      const fundAmount = hre.ethers.parseEther("1"); // Fund with 1 AVAX for testnet
+      const fundTx = await treasury.fundHouseTreasury({ value: fundAmount });
+      await fundTx.wait();
+      console.log(`Treasury funded with ${hre.ethers.formatEther(fundAmount)} AVAX`);
     } catch (error) {
-      console.error("Error authorizing Blackjack:", error);
+      console.error("Error funding treasury:", error.message);
     }
+
+    // Save deployment addresses
+    const deploymentInfo = {
+      NETWORK: "fuji",
+      TREASURY_ADDRESS: await treasury.getAddress(),
+      BLACKJACK_ADDRESS: await blackjack.getAddress(),
+      ROULETTE_ADDRESS: await roulette.getAddress(),
+      POKER_ADDRESS: await poker.getAddress(),
+      DEPLOYMENT_TIMESTAMP: new Date().toISOString()
+    };
+
+    // Save to both .env.local and a deployment log
+    const fs = require('fs');
+    
+    // Save to .env.local
+    fs.writeFileSync(
+      '.env.local',
+      Object.entries(deploymentInfo)
+        .map(([key, value]) => `${key}=${value}`)
+        .join('\n')
+    );
+
+    // Save to deployments log
+    const deploymentLog = `deployments/fuji-${Date.now()}.json`;
+    fs.mkdirSync('deployments', { recursive: true });
+    fs.writeFileSync(
+      deploymentLog,
+      JSON.stringify(deploymentInfo, null, 2)
+    );
+
+    console.log("\nDeployment Summary:");
+    console.log("===================");
+    console.log("Network: Avalanche Fuji Testnet");
+    console.log("Treasury:", await treasury.getAddress());
+    console.log("Blackjack:", await blackjack.getAddress());
+    console.log("Roulette:", await roulette.getAddress());
+    console.log("Poker:", await poker.getAddress());
+    console.log("\nDeployment addresses saved to:", deploymentLog);
+    
+    // Verify final state
+    const treasuryBalance = await treasury.getHouseFunds();
+    console.log("\nFinal Treasury Balance:", hre.ethers.formatEther(treasuryBalance), "AVAX");
+
+  } catch (error) {
+    console.error("\nDeployment failed:", error);
+    process.exitCode = 1;
   }
-
-  // Check and authorize Roulette
-  const rouletteAuthorized = await treasury.authorizedGames(await roulette.getAddress());
-  if (!rouletteAuthorized) {
-    try {
-      const rouletteTx = await treasury.authorizeGame(await roulette.getAddress());
-      await rouletteTx.wait();
-      console.log("Roulette authorized in treasury");
-    } catch (error) {
-      console.error("Error authorizing Roulette:", error);
-    }
-  }
-
-  // Check and authorize Poker
-  const pokerAuthorized = await treasury.authorizedGames(await poker.getAddress());
-  if (!pokerAuthorized) {
-    try {
-      const pokerTx = await treasury.authorizeGame(await poker.getAddress());
-      await pokerTx.wait();
-      console.log("Poker authorized in treasury");
-    } catch (error) {
-      console.error("Error authorizing Poker:", error);
-    }
-  }
-
-  // Fund treasury
-  console.log("Funding treasury...");
-  const fundTx = await treasury.fundHouseTreasury({ value: hre.ethers.parseEther("100") });
-  await fundTx.wait();
-  console.log("Treasury funded with 100 ETH");
-
-  // Log final setup and verify authorizations
-  console.log("\nFinal contract setup:");
-  console.log("Treasury address:", await treasury.getAddress());
-  console.log("Blackjack address:", await blackjack.getAddress());
-  console.log("Roulette address:", await roulette.getAddress());
-  console.log("Poker address:", await poker.getAddress());
-  
-  // Verify final authorizations
-  const finalBlackjackAuth = await treasury.authorizedGames(await blackjack.getAddress());
-  const finalRouletteAuth = await treasury.authorizedGames(await roulette.getAddress());
-  const finalPokerAuth = await treasury.authorizedGames(await poker.getAddress());
-  console.log("\nAuthorization status:");
-  console.log("Blackjack authorized:", finalBlackjackAuth);
-  console.log("Roulette authorized:", finalRouletteAuth);
-  console.log("Poker authorized:", finalPokerAuth);
-  console.log("Treasury balance:", hre.ethers.formatEther(await treasury.getHouseFunds()), "ETH");
-
-  // Save deployment addresses to a file for the backend
-  const fs = require('fs');
-  const deploymentInfo = {
-    TREASURY_ADDRESS: await treasury.getAddress(),
-    BLACKJACK_ADDRESS: await blackjack.getAddress(),
-    ROULETTE_ADDRESS: await roulette.getAddress(),
-    POKER_ADDRESS: await poker.getAddress()
-  };
-
-  fs.writeFileSync(
-    '.env.local',
-    Object.entries(deploymentInfo)
-      .map(([key, value]) => `${key}=${value}`)
-      .join('\n')
-  );
-  console.log("\nDeployment addresses saved to .env.local");
 }
 
 main().catch((error) => {
-  console.error("Deployment failed:", error);
+  console.error("\nFatal error:", error);
   process.exitCode = 1;
 });
