@@ -28,11 +28,15 @@ async function main() {
   await roulette.waitForDeployment();
   console.log("Roulette deployed to:", await roulette.getAddress());
 
-  // Deploy Poker
   const Poker = await hre.ethers.getContractFactory("Poker");
   const poker = await Poker.deploy(minBetAmount, treasuryAddress);
   await poker.waitForDeployment();
   console.log("Poker deployed to:", await poker.getAddress());
+
+  const Balatro = await hre.ethers.getContractFactory("Balatro");
+  const balatro = await Balatro.deploy(minBetAmount, treasuryAddress);
+  await balatro.waitForDeployment();
+  console.log("Balatro deployed to:", await balatro.getAddress());
 
   // Authorize games in treasury
   console.log("Authorizing games in treasury...");
@@ -73,6 +77,18 @@ async function main() {
     }
   }
 
+  // Check and authorize Balatro
+  const balatroAuthorized = await treasury.authorizedGames(await balatro.getAddress());
+  if (!balatroAuthorized) {
+    try {
+      const balatroTx = await treasury.authorizeGame(await balatro.getAddress());
+      await balatroTx.wait();
+      console.log("Balatro authorized in treasury");
+    } catch (error) {
+      console.error("Error authorizing Balatro:", error);
+    }
+  }
+
   // Fund treasury
   console.log("Funding treasury...");
   const fundTx = await treasury.fundHouseTreasury({ value: hre.ethers.parseEther("100") });
@@ -85,15 +101,17 @@ async function main() {
   console.log("Blackjack address:", await blackjack.getAddress());
   console.log("Roulette address:", await roulette.getAddress());
   console.log("Poker address:", await poker.getAddress());
-  
+  console.log("Balatro address:", await balatro.getAddress());
   // Verify final authorizations
   const finalBlackjackAuth = await treasury.authorizedGames(await blackjack.getAddress());
   const finalRouletteAuth = await treasury.authorizedGames(await roulette.getAddress());
   const finalPokerAuth = await treasury.authorizedGames(await poker.getAddress());
+  const finalBalatroAuth = await treasury.authorizedGames(await balatro.getAddress());
   console.log("\nAuthorization status:");
   console.log("Blackjack authorized:", finalBlackjackAuth);
   console.log("Roulette authorized:", finalRouletteAuth);
   console.log("Poker authorized:", finalPokerAuth);
+  console.log("Balatro authorized:", finalBalatroAuth);
   console.log("Treasury balance:", hre.ethers.formatEther(await treasury.getHouseFunds()), "ETH");
 
   // Save deployment addresses to a file for the backend
@@ -102,7 +120,8 @@ async function main() {
     TREASURY_ADDRESS: await treasury.getAddress(),
     BLACKJACK_ADDRESS: await blackjack.getAddress(),
     ROULETTE_ADDRESS: await roulette.getAddress(),
-    POKER_ADDRESS: await poker.getAddress()
+    POKER_ADDRESS: await poker.getAddress(),
+    BALATRO_ADDRESS: await balatro.getAddress()
   };
 
   fs.writeFileSync(
