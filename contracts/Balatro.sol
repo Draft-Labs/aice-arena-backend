@@ -111,7 +111,7 @@ contract Balatro is ReentrancyGuard {
         emit GameStarted(msg.sender, msg.value);
     }
     
-    // Draw a card for the current hand
+    // Modified drawCard function to draw up to 5 cards
     function drawCard() external onlyActiveGame {
         Game storage game = games[msg.sender];
         if (game.state != GameState.InProgress) revert InvalidGameState();
@@ -120,34 +120,104 @@ contract Balatro is ReentrancyGuard {
         require(game.hands.length > 0, "No active hands");
         Hand storage currentHand = game.hands[game.hands.length - 1];
         
-        // Generate pseudo-random card
-        uint256 randomValue = uint256(keccak256(abi.encodePacked(
-            block.timestamp,
-            block.prevrandao,
-            msg.sender,
-            game.roundNumber,
-            currentHand.cards.length
-        )));
+        // Draw cards until we have 5
+        while (currentHand.cards.length < 5) {
+            // Generate pseudo-random card
+            uint256 randomValue = uint256(keccak256(abi.encodePacked(
+                block.timestamp,
+                block.prevrandao,
+                msg.sender,
+                game.roundNumber,
+                currentHand.cards.length
+            )));
+            
+            // Create new card
+            Card memory newCard;
+            newCard.rank = uint8((randomValue % 13) + 1);
+            newCard.suit = CardSuit(uint8(randomValue % 4));
+            newCard.isJoker = false;
+            newCard.multiplier = 1;
+            
+            // Small chance for Joker (1%)
+            if (randomValue % 100 == 0) {
+                newCard.isJoker = true;
+                newCard.suit = CardSuit.Joker;
+                newCard.rank = 0;
+                newCard.multiplier = 2;  // Base Joker multiplier
+            }
+            
+            // Add card to hand
+            currentHand.cards.push(newCard);
+            
+            emit CardDrawn(msg.sender, newCard.rank, newCard.suit);
+        }
+    }
+    
+    // New function to discard and draw cards
+    function discardAndDraw(uint8[] calldata cardIndices) external onlyActiveGame {
+        Game storage game = games[msg.sender];
+        if (game.state != GameState.InProgress) revert InvalidGameState();
         
-        // Create new card
-        Card memory newCard;
-        newCard.rank = uint8((randomValue % 13) + 1);
-        newCard.suit = CardSuit(uint8(randomValue % 4));
-        newCard.isJoker = false;
-        newCard.multiplier = 1;
+        // Get current hand
+        require(game.hands.length > 0, "No active hands");
+        Hand storage currentHand = game.hands[game.hands.length - 1];
         
-        // Small chance for Joker (1%)
-        if (randomValue % 100 == 0) {
-            newCard.isJoker = true;
-            newCard.suit = CardSuit.Joker;
-            newCard.rank = 0;
-            newCard.multiplier = 2;  // Base Joker multiplier
+        // Validate indices
+        require(cardIndices.length <= 5, "Cannot discard more than 5 cards");
+        require(currentHand.cards.length == 5, "Must have full hand to discard");
+        
+        // Create a new array for the remaining cards
+        Card[] memory remainingCards = new Card[](5 - cardIndices.length);
+        bool[] memory isDiscarded = new bool[](5);
+        
+        // Mark cards to be discarded
+        for (uint8 i = 0; i < cardIndices.length; i++) {
+            require(cardIndices[i] < 5, "Invalid card index");
+            require(!isDiscarded[cardIndices[i]], "Card already selected for discard");
+            isDiscarded[cardIndices[i]] = true;
         }
         
-        // Add card to hand
-        currentHand.cards.push(newCard);
+        // Copy remaining cards
+        uint256 remainingIndex = 0;
+        for (uint8 i = 0; i < 5; i++) {
+            if (!isDiscarded[i]) {
+                remainingCards[remainingIndex] = currentHand.cards[i];
+                remainingIndex++;
+            }
+        }
         
-        emit CardDrawn(msg.sender, newCard.rank, newCard.suit);
+        // Clear current hand and add remaining cards back
+        delete currentHand.cards;
+        for (uint256 i = 0; i < remainingCards.length; i++) {
+            currentHand.cards.push(remainingCards[i]);
+        }
+        
+        // Draw new cards to fill hand
+        while (currentHand.cards.length < 5) {
+            uint256 randomValue = uint256(keccak256(abi.encodePacked(
+                block.timestamp,
+                block.prevrandao,
+                msg.sender,
+                game.roundNumber,
+                currentHand.cards.length
+            )));
+            
+            Card memory newCard;
+            newCard.rank = uint8((randomValue % 13) + 1);
+            newCard.suit = CardSuit(uint8(randomValue % 4));
+            newCard.isJoker = false;
+            newCard.multiplier = 1;
+            
+            if (randomValue % 100 == 0) {
+                newCard.isJoker = true;
+                newCard.suit = CardSuit.Joker;
+                newCard.rank = 0;
+                newCard.multiplier = 2;
+            }
+            
+            currentHand.cards.push(newCard);
+            emit CardDrawn(msg.sender, newCard.rank, newCard.suit);
+        }
     }
     
     // Complete current hand and calculate score
@@ -190,10 +260,13 @@ contract Balatro is ReentrancyGuard {
         // Count ranks and suits
         uint8[14] memory rankCounts;  // 0 for Joker, 1-13 for regular cards
         uint8[5] memory suitCounts;   // Include Joker suit
+        uint8 jokerCount = 0;
         
+        // First pass: count cards and jokers
         for (uint256 i = 0; i < hand.cards.length; i++) {
             Card memory card = hand.cards[i];
             if (card.isJoker) {
+                jokerCount++;
                 rankCounts[0]++;
                 suitCounts[uint8(CardSuit.Joker)]++;
             } else {
@@ -201,36 +274,86 @@ contract Balatro is ReentrancyGuard {
                 suitCounts[uint8(card.suit)]++;
             }
         }
-        
-        // Check for poker hands (simplified version)
-        bool hasPair = false;
-        bool hasThreeOfAKind = false;
-        bool hasFourOfAKind = false;
-        bool hasFlush = false;
+
+        // Check for straight
         bool hasStraight = false;
-        
-        // Check pairs, three of a kind, four of a kind
-        for (uint8 i = 1; i <= 13; i++) {
-            if (rankCounts[i] == 2) hasPair = true;
-            if (rankCounts[i] == 3) hasThreeOfAKind = true;
-            if (rankCounts[i] == 4) hasFourOfAKind = true;
+        // Check each possible starting position (Ace can be low or high)
+        for (uint8 start = 1; start <= 10; start++) {
+            uint8 consecutiveCount = 0;
+            uint8 availableJokers = jokerCount;
+            
+            for (uint8 i = 0; i < 5; i++) {
+                uint8 currentRank = start + i;
+                if (currentRank > 13) currentRank = currentRank - 13; // Handle Ace high
+                
+                if (rankCounts[currentRank] > 0) {
+                    consecutiveCount++;
+                } else if (availableJokers > 0) {
+                    consecutiveCount++;
+                    availableJokers--;
+                } else {
+                    break;
+                }
+            }
+            
+            if (consecutiveCount == 5) {
+                hasStraight = true;
+                break;
+            }
         }
         
         // Check flush
-        for (uint8 i = 0; i < 4; i++) {
-            if (suitCounts[i] >= 5) hasFlush = true;
+        bool hasFlush = false;
+        uint8 maxSuitCount = 0;
+        for (uint8 i = 0; i < 4; i++) { // Don't count Joker suit
+            if (suitCounts[i] + jokerCount >= 5) {
+                hasFlush = true;
+                maxSuitCount = suitCounts[i];
+                break;
+            }
         }
         
-        // Apply multipliers
-        if (hasFourOfAKind) baseMultiplier *= 10;
-        else if (hasThreeOfAKind && hasPair) baseMultiplier *= 7;  // Full house
-        else if (hasFlush) baseMultiplier *= 6;
-        else if (hasStraight) baseMultiplier *= 5;
-        else if (hasThreeOfAKind) baseMultiplier *= 4;
-        else if (hasPair) baseMultiplier *= 2;
+        // Find highest pair/three/four of a kind
+        uint8 maxCount = 0;
+        uint8 secondMaxCount = 0;
         
-        // Apply Joker multipliers
-        baseMultiplier *= (2 ** rankCounts[0]);  // Double for each Joker
+        for (uint8 i = 1; i <= 13; i++) {
+            if (rankCounts[i] > maxCount) {
+                secondMaxCount = maxCount;
+                maxCount = rankCounts[i];
+            } else if (rankCounts[i] > secondMaxCount) {
+                secondMaxCount = rankCounts[i];
+            }
+        }
+        
+        // Add jokers to the highest count possible
+        maxCount += jokerCount;
+        
+        // Calculate multiplier based on hand strength
+        if (hasFlush && hasStraight) {
+            baseMultiplier = 50; // Straight Flush
+        } else if (maxCount >= 4) {
+            baseMultiplier = 25; // Four of a Kind
+        } else if (maxCount == 3 && secondMaxCount >= 2) {
+            baseMultiplier = 15; // Full House
+        } else if (hasFlush) {
+            baseMultiplier = 10; // Flush
+        } else if (hasStraight) {
+            baseMultiplier = 8; // Straight
+        } else if (maxCount == 3) {
+            baseMultiplier = 5; // Three of a Kind
+        } else if (maxCount == 2 && secondMaxCount == 2) {
+            baseMultiplier = 3; // Two Pair
+        } else if (maxCount == 2) {
+            baseMultiplier = 2; // One Pair
+        }
+        
+        // Apply individual card multipliers (for special cards like Jokers)
+        for (uint256 i = 0; i < hand.cards.length; i++) {
+            if (hand.cards[i].isJoker) {
+                baseMultiplier *= 2;  // Double multiplier for each Joker
+            }
+        }
         
         return baseMultiplier;
     }
