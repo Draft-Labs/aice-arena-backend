@@ -128,7 +128,8 @@ contract Roulette is ReentrancyGuard {
         if (totalWinnings > 0) {
             treasury.processBetWin(msg.sender, totalWinnings);
         } else {
-            // Transfer lost bets to treasury
+            // Transfer lost bets to treasury using processBetLoss
+            treasury.processBetLoss(msg.sender, totalBets);
             treasury.fundHouseTreasury{value: totalBets}();
         }
         

@@ -75,7 +75,7 @@ async function main() {
 
   // Fund treasury
   console.log("Funding treasury...");
-  const fundTx = await treasury.fundHouseTreasury({ value: hre.ethers.parseEther("100") });
+  const fundTx = await treasury.ownerFundTreasury({ value: hre.ethers.parseEther("100") });
   await fundTx.wait();
   console.log("Treasury funded with 100 ETH");
 

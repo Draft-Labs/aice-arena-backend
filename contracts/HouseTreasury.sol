@@ -154,8 +154,8 @@ contract HouseTreasury is ReentrancyGuard {
         emit BalanceUpdated(msg.sender, playerBalances[msg.sender]);
     }
 
-    // Owner can add funds to house treasury
-    function fundHouseTreasury() external payable onlyOwner {
+    // Games transfer lost bets to house treasury
+    function fundHouseTreasury() external payable onlyAuthorizedGame {
         require(msg.value > 0, "Must fund with some ETH");
         houseFunds += msg.value;
         emit HouseFunded(msg.value);
@@ -163,7 +163,7 @@ contract HouseTreasury is ReentrancyGuard {
 
     // Owner can withdraw funds from house treasury
     function withdrawHouseFunds(uint256 amount) external onlyOwner nonReentrant {
-        require(amount > 0, "Must withdraw some ETH");
+        require(amount > 0, "Must withdraw some AVAX");
         require(amount <= houseFunds, "Insufficient house funds");
         
         houseFunds -= amount;
@@ -194,5 +194,12 @@ contract HouseTreasury is ReentrancyGuard {
     // Add function to get player's net winnings
     function getPlayerNetWinnings(address player) external view returns (int256) {
         return playerNetWinnings[player];
+    }
+
+    // Owner can add funds to house treasury
+    function ownerFundTreasury() external payable onlyOwner {
+        require(msg.value > 0, "Must fund with some ETH");
+        houseFunds += msg.value;
+        emit HouseFunded(msg.value);
     }
 }

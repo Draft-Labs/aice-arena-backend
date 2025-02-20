@@ -11,9 +11,9 @@ async function main() {
   console.log("Withdrawing funds with account:", deployer.address);
 
   // Contract addresses
-  const TREASURY_ADDRESS = "0x875F9bC922006Ec89ce55212Fb351f4b3FAfa109";
-  const BLACKJACK_ADDRESS = "0x75189f668a08693430632Be3a1f38a2Fbe5038F5";
-  const ROULETTE_ADDRESS = "0xcFf96B0578816b96Aec75b3DAb6A185aA9bC2E23";
+  const TREASURY_ADDRESS = "0x2B19957f9BDb7E6FbbCe7D82BcCc9a76b1D02f8B";
+  const BLACKJACK_ADDRESS = "0x4DE4e4520C4AE30e774Ea703CA4B30478d44cE81";
+  const ROULETTE_ADDRESS = "0x615341F7F70381DF8f5C499e6Acf38f03e18F5bE";
 
   // Get contract instances
   const treasury = await hre.ethers.getContractAt("HouseTreasury", TREASURY_ADDRESS, deployer);

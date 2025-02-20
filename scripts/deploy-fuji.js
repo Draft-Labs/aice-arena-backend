@@ -21,8 +21,8 @@ async function main() {
   await treasury.waitForDeployment();
   console.log("Treasury deployed to:", await treasury.getAddress());
 
-  // Deploy Games with appropriate min bet for testnet (0.01 AVAX)
-  const minBetAmount = hre.ethers.parseEther("0.01");
+  // Deploy Games with appropriate min bet for testnet (0.001 AVAX)
+  const minBetAmount = hre.ethers.parseEther("0.001");
   const treasuryAddress = await treasury.getAddress();
 
   // Deploy Blackjack
@@ -72,8 +72,9 @@ async function main() {
 
   // Fund treasury with 10 AVAX for testnet
   console.log("Funding treasury...");
-  const fundTx = await treasury.fundHouseTreasury({ 
-    value: hre.ethers.parseEther("10"),
+  const fundAmount = hre.ethers.parseEther("10.0"); // Fund with 10 AVAX
+  const fundTx = await treasury.ownerFundTreasury({
+    value: fundAmount,
     gasLimit: 8000000
   });
   await fundTx.wait();
