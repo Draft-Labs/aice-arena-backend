@@ -114,9 +114,12 @@ contract Roulette is ReentrancyGuard {
         
         // Process results immediately
         Bet[] storage bets = playerBets[msg.sender];
+        uint256 totalBets = 0;
         uint256 totalWinnings = 0;
         
+        // Calculate total bets and winnings
         for (uint256 i = 0; i < bets.length; i++) {
+            totalBets += bets[i].amount;
             if (bets[i].number == result) {
                 totalWinnings += bets[i].amount * 36;
             }
@@ -124,6 +127,9 @@ contract Roulette is ReentrancyGuard {
         
         if (totalWinnings > 0) {
             treasury.processBetWin(msg.sender, totalWinnings);
+        } else {
+            // Transfer lost bets to treasury
+            treasury.fundHouseTreasury{value: totalBets}();
         }
         
         emit SpinResult(result);

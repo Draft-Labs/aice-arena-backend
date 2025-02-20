@@ -176,7 +176,8 @@ contract Blackjack is ReentrancyGuard {
                 treasury.processBetWin(player, payout);
                 emit GameResolved(player, payout);
             } else {
-                // For losses (multiplier = 0), funds stay in treasury
+                // For losses (multiplier = 0), transfer bet to treasury
+                treasury.fundHouseTreasury{value: bet}();
                 emit GameResolved(player, 0);
             }
             
