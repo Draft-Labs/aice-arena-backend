@@ -62,11 +62,6 @@ contract Blackjack is ReentrancyGuard {
         _;
     }
 
-    modifier noActiveGame() {
-        if (activeGames[msg.sender]) revert PlayerAlreadyHasActiveBet();
-        _;
-    }
-
     modifier notResolving() {
         if (resolving) revert ResolutionInProgress();
         _;
