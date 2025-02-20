@@ -101,49 +101,36 @@ contract Roulette is ReentrancyGuard {
         }
     }
 
-    function spin(uint8 result) external onlyOwner nonReentrant notResolving {
-        resolving = true;
-        require(result <= 36, "Invalid roulette number.");
-        emit SpinResult(result);
-
-        WinningInfo[] memory winnings = new WinningInfo[](activePlayers.length * 10); // Assuming max 10 bets per player
-        uint256 winningCount = 0;
-
-        // Calculate all winnings and update state
-        for (uint256 p = 0; p < activePlayers.length; p++) {
-            address player = activePlayers[p];
-            Bet[] storage playerBetList = playerBets[player];
-
-            for (uint256 i = 0; i < playerBetList.length; i++) {
-                Bet memory bet = playerBetList[i];
-                
-                if (bet.number == result) {
-                    // 35:1 payout for winning straight-up bets
-                    uint256 winningAmount = bet.amount * 36; // includes original bet
-                    winnings[winningCount] = WinningInfo({
-                        player: bet.player,
-                        amount: winningAmount
-                    });
-                    winningCount++;
-                    emit GameResult(result, winningAmount, true);
-                } else {
-                    emit GameResult(result, 0, false);
-                }
+    function spinWheel() external nonReentrant whenNotPaused {
+        require(playerBets[msg.sender].length > 0, "No active bets");
+        
+        bytes32 hash = keccak256(abi.encodePacked(
+            block.timestamp,
+            block.prevrandao,
+            msg.sender,
+            gasleft()
+        ));
+        uint8 result = uint8(uint256(hash) % 37);
+        
+        // Process results immediately
+        Bet[] storage bets = playerBets[msg.sender];
+        uint256 totalWinnings = 0;
+        
+        for (uint256 i = 0; i < bets.length; i++) {
+            if (bets[i].number == result) {
+                totalWinnings += bets[i].amount * 36;
             }
-            
-            // Clear player's bets
-            delete playerBets[player];
         }
-
-        // Clear the active players list
-        delete activePlayers;
-
-        // Process all payouts through treasury
-        for (uint256 i = 0; i < winningCount; i++) {
-            treasury.processBetWin(winnings[i].player, winnings[i].amount);
-            emit Payout(winnings[i].player, winnings[i].amount);
+        
+        if (totalWinnings > 0) {
+            treasury.processBetWin(msg.sender, totalWinnings);
         }
-        resolving = false;
+        
+        emit SpinResult(result);
+        emit GameResult(result, totalWinnings, totalWinnings > 0);
+        
+        // Clear bets
+        delete playerBets[msg.sender];
     }
 
     function getPlayerBets(address player) external view returns (Bet[] memory) {

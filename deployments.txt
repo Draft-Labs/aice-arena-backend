@@ -1,0 +1,6 @@
+
+# Avalanche Fuji Testnet Deployment 2025-02-20T19:34:13.687Z
+Treasury: 0x875F9bC922006Ec89ce55212Fb351f4b3FAfa109
+Blackjack: 0x75189f668a08693430632Be3a1f38a2Fbe5038F5
+Roulette: 0xcFf96B0578816b96Aec75b3DAb6A185aA9bC2E23
+Verification Status: verified

@@ -99,33 +99,44 @@ contract Blackjack is ReentrancyGuard {
         emit ContractUnpaused();
     }
 
-    function placeBet() external payable nonReentrant whenNotPaused rateLimited {
-        if (msg.value < minBetAmount) 
-            revert BetBelowMinimum();
-        if (isPlayerActive[msg.sender]) 
-            revert PlayerAlreadyHasActiveBet();
+    function dealCard() internal view returns (uint8) {
+        bytes32 hash = keccak256(abi.encodePacked(
+            block.timestamp,
+            block.prevrandao,
+            msg.sender,
+            gasleft()
+        ));
+        return uint8(uint256(hash) % 52) + 1;
+    }
 
-        // Check if treasury has enough funds to cover potential win
-        if (treasury.getHouseFunds() < msg.value * 2)
-            revert InsufficientTreasuryBalance();
-
-        // Update player state
-        playerHands[msg.sender] = PlayerHand({
-            bet: msg.value,
-            cards: new uint8[](0),
-            resolved: false
-        });
+    function placeBetAndDeal() external payable nonReentrant whenNotPaused {
+        require(msg.value >= minBetAmount, "Bet below minimum");
+        require(treasury.getHouseFunds() >= msg.value * 3, "Insufficient house funds");
+        
+        PlayerHand storage hand = playerHands[msg.sender];
+        hand.bet = msg.value;
+        
+        // Deal initial cards
+        hand.cards = new uint8[](2);
+        hand.cards[0] = dealCard();
+        hand.cards[1] = dealCard();
         
         isPlayerActive[msg.sender] = true;
-        activeGames[msg.sender] = true;
         activePlayers.push(msg.sender);
-        lastActionTime[msg.sender] = block.timestamp;
-
-        // Transfer bet to treasury
-        (bool success, ) = address(treasury).call{value: msg.value}("");
-        require(success, "Failed to transfer bet to treasury");
         
         emit BetPlaced(msg.sender, msg.value);
+        emit CardDealt(msg.sender, hand.cards[0]);
+        emit CardDealt(msg.sender, hand.cards[1]);
+    }
+
+    function hit() external whenNotPaused {
+        require(isPlayerActive[msg.sender], "No active game");
+        
+        PlayerHand storage hand = playerHands[msg.sender];
+        uint8 newCard = dealCard();
+        hand.cards.push(newCard);
+        
+        emit CardDealt(msg.sender, newCard);
     }
 
     function resolveGames(address[] calldata players, uint256[] calldata multipliers) 
