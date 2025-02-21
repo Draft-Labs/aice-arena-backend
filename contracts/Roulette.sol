@@ -103,8 +103,9 @@ contract Roulette is ReentrancyGuard {
             emit BetPlaced(msg.sender, individualBetAmount, numbers[i]);
         }
         
-        // Process bet amount through treasury
-        treasury.processBetLoss(msg.sender, totalBetAmount);
+        // Only transfer the ETH to treasury, don't process bet loss yet
+        (bool success, ) = address(treasury).call{value: msg.value}("");
+        require(success, "Failed to transfer bet to treasury");
     }
 
     function spinWheel() external nonReentrant whenNotPaused {
@@ -134,9 +135,8 @@ contract Roulette is ReentrancyGuard {
         if (totalWinnings > 0) {
             treasury.processBetWin(msg.sender, totalWinnings);
         } else {
-            // Transfer lost bets to treasury using processBetLoss
+            // Only process bet loss, remove the direct treasury funding
             treasury.processBetLoss(msg.sender, totalBets);
-            treasury.fundHouseTreasury();
         }
         
         emit SpinResult(result);
