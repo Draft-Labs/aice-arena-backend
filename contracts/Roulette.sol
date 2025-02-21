@@ -76,11 +76,14 @@ contract Roulette is ReentrancyGuard {
     }
 
     function placeBet(uint8[] calldata numbers) external payable nonReentrant whenNotPaused {
-        require(msg.value >= minBetAmount * numbers.length, "Bet amount below minimum");
         require(numbers.length > 0, "Must bet on at least one number");
         
-        uint256 individualBetAmount = msg.value / numbers.length;
+        uint256 totalBetAmount = msg.value;
+        uint256 individualBetAmount = totalBetAmount / numbers.length;
         require(individualBetAmount >= minBetAmount, "Individual bet amount below minimum");
+        
+        // Verify player can place bet through treasury
+        require(treasury.canPlaceBet(msg.sender, totalBetAmount), "Insufficient balance or no active account");
         
         // Add player to activePlayers if not already present
         if (playerBets[msg.sender].length == 0) {
@@ -99,6 +102,9 @@ contract Roulette is ReentrancyGuard {
             
             emit BetPlaced(msg.sender, individualBetAmount, numbers[i]);
         }
+        
+        // Process bet amount through treasury
+        treasury.processBetLoss(msg.sender, totalBetAmount);
     }
 
     function spinWheel() external nonReentrant whenNotPaused {
@@ -130,7 +136,7 @@ contract Roulette is ReentrancyGuard {
         } else {
             // Transfer lost bets to treasury using processBetLoss
             treasury.processBetLoss(msg.sender, totalBets);
-            treasury.fundHouseTreasury{value: totalBets}();
+            treasury.fundHouseTreasury();
         }
         
         emit SpinResult(result);
