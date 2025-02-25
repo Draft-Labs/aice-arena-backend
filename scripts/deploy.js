@@ -1,7 +1,9 @@
 const hre = require("hardhat");
 
 async function main() {
-  console.log("Starting deployment to Avalanche Fuji Testnet...");
+  // Determine network
+  const network = hre.network.name;
+  console.log(`Starting deployment to ${network}...`);
 
   // Get the deployer's signer
   const [deployer] = await hre.ethers.getSigners();
@@ -9,7 +11,8 @@ async function main() {
   const deployerBalance = await deployer.provider.getBalance(deployerAddress);
 
   console.log("Deploying contracts with account:", deployerAddress);
-  console.log("Account balance:", hre.ethers.formatEther(deployerBalance), "AVAX");
+  console.log("Account balance:", hre.ethers.formatEther(deployerBalance), 
+    network === 'fuji' ? "AVAX" : "ETH");
 
   try {
     // Deploy Treasury
@@ -79,7 +82,7 @@ async function main() {
 
     // Save deployment addresses
     const deploymentInfo = {
-      NETWORK: "fuji",
+      NETWORK: network,
       TREASURY_ADDRESS: await treasury.getAddress(),
       BLACKJACK_ADDRESS: await blackjack.getAddress(),
       ROULETTE_ADDRESS: await roulette.getAddress(),
@@ -87,19 +90,33 @@ async function main() {
       DEPLOYMENT_TIMESTAMP: new Date().toISOString()
     };
 
-    // Save to both .env.local and a deployment log
+    // Save to environment file based on network
     const fs = require('fs');
+    const envFile = network === 'fuji' ? '.env.fuji' : '.env.local';
     
-    // Save to .env.local
+    // Create REACT_APP_ prefixed environment variables
+    const reactEnvVars = {
+      REACT_APP_NETWORK: network,
+      REACT_APP_RPC_URL: network === 'fuji' 
+        ? "https://api.avax-test.network/ext/bc/C/rpc"
+        : "http://127.0.0.1:8545",
+      REACT_APP_CHAIN_ID: network === 'fuji' ? "43113" : "31337",
+      REACT_APP_TREASURY_ADDRESS: deploymentInfo.TREASURY_ADDRESS,
+      REACT_APP_BLACKJACK_ADDRESS: deploymentInfo.BLACKJACK_ADDRESS,
+      REACT_APP_ROULETTE_ADDRESS: deploymentInfo.ROULETTE_ADDRESS,
+      REACT_APP_POKER_ADDRESS: deploymentInfo.POKER_ADDRESS
+    };
+
+    // Save to environment file
     fs.writeFileSync(
-      '.env.local',
-      Object.entries(deploymentInfo)
+      envFile,
+      Object.entries(reactEnvVars)
         .map(([key, value]) => `${key}=${value}`)
         .join('\n')
     );
 
     // Save to deployments log
-    const deploymentLog = `deployments/fuji-${Date.now()}.json`;
+    const deploymentLog = `deployments/${network}-${Date.now()}.json`;
     fs.mkdirSync('deployments', { recursive: true });
     fs.writeFileSync(
       deploymentLog,
@@ -108,7 +125,7 @@ async function main() {
 
     console.log("\nDeployment Summary:");
     console.log("===================");
-    console.log("Network: Avalanche Fuji Testnet");
+    console.log(`Network: ${network}`);
     console.log("Treasury:", await treasury.getAddress());
     console.log("Blackjack:", await blackjack.getAddress());
     console.log("Roulette:", await roulette.getAddress());
@@ -117,7 +134,8 @@ async function main() {
     
     // Verify final state
     const treasuryBalance = await treasury.getHouseFunds();
-    console.log("\nFinal Treasury Balance:", hre.ethers.formatEther(treasuryBalance), "AVAX");
+    console.log("\nFinal Treasury Balance:", hre.ethers.formatEther(treasuryBalance), 
+      network === 'fuji' ? "AVAX" : "ETH");
 
   } catch (error) {
     console.error("\nDeployment failed:", error);
