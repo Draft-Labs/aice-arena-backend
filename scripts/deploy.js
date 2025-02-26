@@ -23,7 +23,7 @@ async function main() {
     console.log("Treasury deployed to:", await treasury.getAddress());
 
     // Deploy Games
-    const minBetAmount = hre.ethers.parseEther("0.1"); // 0.1 AVAX minimum bet
+    const minBetAmount = hre.ethers.parseEther("0.01"); // 0.01 AVAX minimum bet
     const treasuryAddress = await treasury.getAddress();
 
     console.log("\nDeploying Blackjack...");
@@ -72,10 +72,15 @@ async function main() {
     // Fund treasury
     console.log("\nFunding treasury...");
     try {
-      const fundAmount = hre.ethers.parseEther("1"); // Fund with 1 AVAX for testnet
+      let fundAmount;
+      if (network === 'fuji') {
+        fundAmount = hre.ethers.parseEther("10"); // Fund with 10 AVAX for fuji
+      } else {
+        fundAmount = hre.ethers.parseEther("100"); // Fund with 100 AVAX for testnet
+      }
       const fundTx = await treasury.fundHouseTreasury({ value: fundAmount });
       await fundTx.wait();
-      console.log(`Treasury funded with ${hre.ethers.formatEther(fundAmount)} AVAX`);
+      console.log(`Treasury funded with ${hre.ethers.formatEther(fundAmount)} ${network === 'local' ? "AVAX" : "ETH"}`);
     } catch (error) {
       console.error("Error funding treasury:", error.message);
     }
