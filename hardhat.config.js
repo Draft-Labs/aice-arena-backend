@@ -1,7 +1,7 @@
 require("@nomicfoundation/hardhat-toolbox");
 require("dotenv").config();
 
-const { PRIVATE_KEY } = process.env;
+const PRIVATE_KEY = process.env.PRIVATE_KEY || "0000000000000000000000000000000000000000000000000000000000000000";
 
 module.exports = {
   solidity: {
@@ -23,5 +23,23 @@ module.exports = {
       url: "http://127.0.0.1:8545",
       chainId: 31337
     },
+    fuji: {
+      url: "https://api.avax-test.network/ext/bc/C/rpc",
+      chainId: 43113,
+      accounts: [PRIVATE_KEY],
+      gasPrice: "auto",
+      verify: {
+        etherscan: {
+          apiUrl: "https://api-testnet.snowtrace.io/api",
+          browserURL: "https://testnet.snowtrace.io",
+          apiKey: "YourApiKeyToken"
+        }
+      }
+    }
+  },
+  etherscan: {
+    apiKey: {
+      avalancheFujiTestnet: "YourApiKeyToken"
+    }
   }
 };
