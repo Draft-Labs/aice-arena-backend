@@ -121,12 +121,14 @@ async function main() {
     );
 
     // Save to deployments log
-    const deploymentLog = `deployments/${network}-${Date.now()}.json`;
-    fs.mkdirSync('deployments', { recursive: true });
-    fs.writeFileSync(
-      deploymentLog,
-      JSON.stringify(deploymentInfo, null, 2)
-    );
+    if (network === 'fuji') {
+      const deploymentLog = `deployments/${network}-${Date.now()}.json`;
+      fs.mkdirSync('deployments', { recursive: true });
+      fs.writeFileSync(
+        deploymentLog,
+        JSON.stringify(deploymentInfo, null, 2)
+      );
+    }
 
     console.log("\nDeployment Summary:");
     console.log("===================");
@@ -135,7 +137,9 @@ async function main() {
     console.log("Blackjack:", await blackjack.getAddress());
     console.log("Roulette:", await roulette.getAddress());
     console.log("Poker:", await poker.getAddress());
-    console.log("\nDeployment addresses saved to:", deploymentLog);
+    if (network === 'fuji') {
+      console.log("\nDeployment addresses saved to:", deploymentLog);
+    }
     
     // Verify final state
     const treasuryBalance = await treasury.getHouseFunds();
