@@ -82,6 +82,10 @@ contract Roulette is ReentrancyGuard {
         uint256 individualBetAmount = msg.value / numbers.length;
         require(individualBetAmount >= minBetAmount, "Individual bet amount below minimum");
         
+        // Forward the bet amount to the treasury
+        (bool success, ) = address(treasury).call{value: msg.value}("");
+        require(success, "Transfer to treasury failed");
+
         // Add player to activePlayers if not already present
         if (playerBets[msg.sender].length == 0) {
             activePlayers.push(msg.sender);
