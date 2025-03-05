@@ -34,7 +34,7 @@ async function main() {
 
     console.log("\nDeploying Roulette...");
     const Roulette = await hre.ethers.getContractFactory("Roulette");
-    const roulette = await Roulette.deploy(minBetAmount, treasuryAddress);
+    const roulette = await Roulette.deploy(treasuryAddress);
     await roulette.waitForDeployment();
     console.log("Roulette deployed to:", await roulette.getAddress());
 
