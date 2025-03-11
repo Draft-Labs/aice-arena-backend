@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "hardhat/console.sol";
 
 contract HouseTreasury is ReentrancyGuard {
     address public owner;
@@ -50,10 +51,22 @@ contract HouseTreasury is ReentrancyGuard {
     // Players open an account by depositing ETH
     function openAccount() external payable whenNotPaused {
         require(msg.value > 0, "Must deposit ETH to open account");
-        require(!activeAccounts[msg.sender], "Account already active");
-
-        playerBalances[msg.sender] = msg.value;
-        activeAccounts[msg.sender] = true;
+        
+        // Debug the account state
+        console.log("Opening account for:", msg.sender);
+        console.log("Account already active?", activeAccounts[msg.sender]);
+        console.log("Current balance:", playerBalances[msg.sender]);
+        console.log("Deposit amount:", msg.value);
+        
+        // Add to existing balance if account already active
+        if (activeAccounts[msg.sender]) {
+            playerBalances[msg.sender] += msg.value;
+        } else {
+            playerBalances[msg.sender] = msg.value;
+            activeAccounts[msg.sender] = true;
+        }
+        
+        console.log("Account opened. New balance:", playerBalances[msg.sender]);
         emit AccountOpened(msg.sender, msg.value);
     }
 
@@ -87,12 +100,20 @@ contract HouseTreasury is ReentrancyGuard {
     // Called by games when a player loses a bet
     function processBetLoss(address player, uint256 amount) external 
         onlyAuthorizedGame {
+        // Debug bet processing
+        console.log("Processing bet for player:", player);
+        console.log("Called by:", msg.sender);
+        console.log("Current player balance:", playerBalances[player]);
+        console.log("Bet amount:", amount);
+        
+        require(activeAccounts[player], "No active account");
         require(playerBalances[player] >= amount, "Insufficient balance");
+        
         playerBalances[player] -= amount;
         houseFunds += amount;
-        
         playerNetWinnings[player] -= int256(amount);
         
+        console.log("Bet processed. New balance:", playerBalances[player]);
         emit BalanceUpdated(player, playerBalances[player]);
         emit NetWinningsUpdated(player, playerNetWinnings[player]);
     }
@@ -111,6 +132,11 @@ contract HouseTreasury is ReentrancyGuard {
     }
 
     function getPlayerBalance(address player) external view returns (uint256) {
+        // Debug info for balance lookups
+        console.log("Getting balance for player:", player);
+        console.log("Account active?", activeAccounts[player]);
+        console.log("Balance:", playerBalances[player]);
+        
         return playerBalances[player];
     }
 
